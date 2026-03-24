@@ -13,6 +13,7 @@ const (
 	DefaultLoopNum = 15
 
 	IssueStatusTodo        = "todo"
+	IssueStatusPlanning    = "planning"
 	IssueStatusRunning     = "running"
 	IssueStatusDone        = "done"
 	IssueStatusFailed      = "failed"
@@ -38,6 +39,8 @@ type Issue struct {
 	ArtifactDir        string `json:"artifact_dir"`
 	WorkspacePath      string `json:"workspace_path"`
 	RepoPath           string `json:"repo_path"`
+	ActivePhase        string `json:"active_phase"`
+	ActivePIDs         []int  `json:"active_pids"`
 	LastError          string `json:"last_error"`
 	InterruptRequested bool   `json:"interrupt_requested"`
 }
@@ -117,6 +120,8 @@ func (i Issue) TemplateJSON() string {
 		ArtifactDir        string `json:"artifact_dir"`
 		WorkspacePath      string `json:"workspace_path"`
 		RepoPath           string `json:"repo_path"`
+		ActivePhase        string `json:"active_phase"`
+		ActivePIDs         []int  `json:"active_pids"`
 		InterruptRequested bool   `json:"interrupt_requested"`
 	}{
 		ID:                 i.ID,
@@ -128,6 +133,8 @@ func (i Issue) TemplateJSON() string {
 		ArtifactDir:        i.ArtifactDir,
 		WorkspacePath:      i.WorkspacePath,
 		RepoPath:           i.RepoPath,
+		ActivePhase:        i.ActivePhase,
+		ActivePIDs:         append([]int(nil), i.ActivePIDs...),
 		InterruptRequested: i.InterruptRequested,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
@@ -143,4 +150,17 @@ func generateIssueID() string {
 		return "issue-unknown"
 	}
 	return "issue-" + hex.EncodeToString(buf)
+}
+
+func IsIssueActiveStatus(status string) bool {
+	return status == IssueStatusPlanning || status == IssueStatusRunning
+}
+
+func IsIssueTerminalStatus(status string) bool {
+	switch status {
+	case IssueStatusDone, IssueStatusFailed, IssueStatusInterrupted, IssueStatusDeleted:
+		return true
+	default:
+		return false
+	}
 }

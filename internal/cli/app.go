@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/eddiearc/relay/internal/relay"
@@ -29,9 +30,27 @@ Commands:
   help     Show this help text
 `
 
+var newServeRunner = func() relay.AgentRunner {
+	return relay.CodexRunner{}
+}
+
 // Run executes the relay CLI and returns a process exit code.
 func Run(args []string) int {
 	return run(args, os.Stdout, os.Stderr)
+}
+
+// RunWithIO executes the relay CLI with explicit stdout/stderr writers.
+func RunWithIO(args []string, stdout, stderr io.Writer) int {
+	return run(args, stdout, stderr)
+}
+
+// SetServeRunnerForTesting overrides the serve runner factory until the returned restore function is called.
+func SetServeRunnerForTesting(factory func() relay.AgentRunner) func() {
+	previous := newServeRunner
+	newServeRunner = factory
+	return func() {
+		newServeRunner = previous
+	}
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -81,8 +100,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "prepare state dir: %v\n", err)
 		return 1
 	}
-	orchestrator := relay.NewOrchestrator(store, relay.ZshRunner{}, relay.CodexRunner{})
+	orchestrator := relay.NewOrchestrator(store, relay.ZshRunner{}, newServeRunner())
 	ctx := context.Background()
+	if recovered, err := recoverActiveIssues(store); err != nil {
+		_, _ = fmt.Fprintf(stderr, "recover active issues: %v\n", err)
+		return 1
+	} else if recovered > 0 {
+		_, _ = fmt.Fprintf(stdout, "recovered %d orphaned active issue(s)\n", recovered)
+	}
 	for {
 		processed, failed := processTodoIssues(ctx, orchestrator, store, stdout, stderr)
 		if *runOnce {
@@ -276,7 +301,7 @@ func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	for _, issue := range issues {
-		if issue.PipelineName == name && issue.Status == relay.IssueStatusRunning {
+		if issue.PipelineName == name && relay.IsIssueActiveStatus(issue.Status) {
 			_, _ = fmt.Fprintf(stderr, "pipeline %s is still referenced by active issue %s\n", name, issue.ID)
 			return 1
 		}
@@ -434,11 +459,11 @@ func runIssueInterrupt(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "issue %s is deleted\n", issue.ID)
 		return 1
 	}
-	if issue.Status == relay.IssueStatusDone || issue.Status == relay.IssueStatusFailed || issue.Status == relay.IssueStatusInterrupted {
+	if relay.IsIssueTerminalStatus(issue.Status) {
 		_, _ = fmt.Fprintf(stderr, "issue %s is already terminal with status %s\n", issue.ID, issue.Status)
 		return 1
 	}
-	if issue.Status == relay.IssueStatusRunning {
+	if relay.IsIssueActiveStatus(issue.Status) {
 		issue.InterruptRequested = true
 		issue.LastError = "interrupt requested by user"
 	} else {
@@ -503,7 +528,7 @@ func runIssueDelete(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "load issue %q: %v\n", *id, err)
 		return 1
 	}
-	if issue.Status == relay.IssueStatusRunning {
+	if relay.IsIssueActiveStatus(issue.Status) {
 		_, _ = fmt.Fprintf(stderr, "issue %s is running and cannot be deleted\n", issue.ID)
 		return 1
 	}
@@ -575,6 +600,9 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "issue=%s status=%s loop=%d repo=%s workspace=%s artifact=%s\n", issue.ID, issue.Status, issue.CurrentLoop, issue.RepoPath, issue.WorkspacePath, issue.ArtifactDir)
+	if issue.ActivePhase != "" {
+		_, _ = fmt.Fprintf(stdout, "active_phase=%s active_pids=%v\n", issue.ActivePhase, issue.ActivePIDs)
+	}
 	if issue.InterruptRequested {
 		_, _ = io.WriteString(stdout, "interrupt_requested=true\n")
 	}
@@ -638,12 +666,19 @@ func runKill(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "load issue: %v\n", err)
 		return 1
 	}
+	if err := terminateIssueProcesses(issue.ActivePIDs); err != nil {
+		_, _ = fmt.Fprintf(stderr, "kill issue processes: %v\n", err)
+		return 1
+	}
 	issue.Status = relay.IssueStatusFailed
 	issue.LastError = "killed by user"
+	issue.ActivePhase = ""
+	issue.ActivePIDs = nil
 	if err := store.SaveIssue(issue); err != nil {
 		_, _ = fmt.Fprintf(stderr, "save issue: %v\n", err)
 		return 1
 	}
+	_ = store.AppendEvent(issue.ID, "issue killed by user")
 	_, _ = fmt.Fprintf(stdout, "issue %s marked as failed\n", issue.ID)
 	return 0
 }
@@ -712,4 +747,49 @@ func processTodoIssues(ctx context.Context, orchestrator *relay.Orchestrator, st
 		_ = writeIssue(stdout, updated)
 	}
 	return processed, failed
+}
+
+func recoverActiveIssues(store *relay.Store) (int, error) {
+	issues, err := store.ListIssues()
+	if err != nil {
+		return 0, err
+	}
+
+	recovered := 0
+	for _, issue := range issues {
+		if !relay.IsIssueActiveStatus(issue.Status) {
+			continue
+		}
+		issue.Status = relay.IssueStatusTodo
+		issue.ActivePhase = ""
+		issue.ActivePIDs = nil
+		issue.InterruptRequested = false
+		issue.LastError = "relay serve restarted while issue was active; previous run discarded"
+		if err := store.SaveIssue(issue); err != nil {
+			return recovered, err
+		}
+		_ = store.AppendEvent(issue.ID, "recovered orphaned active issue after service restart")
+		recovered++
+	}
+	return recovered, nil
+}
+
+func terminateIssueProcesses(pids []int) error {
+	var firstErr error
+	seen := map[int]struct{}{}
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		if _, ok := seen[pid]; ok {
+			continue
+		}
+		seen[pid] = struct{}{}
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }

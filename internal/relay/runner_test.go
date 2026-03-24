@@ -5,17 +5,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	acp "github.com/coder/acp-go-sdk"
 )
 
-func TestCodexRunnerCommandSpecPrefersCodexACPBinary(t *testing.T) {
+func TestCodexRunnerCommandSpecPrefersCodexBinary(t *testing.T) {
 	runner := CodexRunner{
 		LookPath: func(name string) (string, error) {
 			switch name {
-			case "codex-acp":
-				return "/usr/local/bin/codex-acp", nil
+			case "codex":
+				return "/usr/local/bin/codex", nil
 			default:
 				return "", errors.New("not found")
 			}
@@ -26,194 +25,161 @@ func TestCodexRunnerCommandSpecPrefersCodexACPBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("commandSpec: %v", err)
 	}
-	if spec.Command != "/usr/local/bin/codex-acp" {
-		t.Fatalf("expected codex-acp binary, got %+v", spec)
+	if spec.Command != "/usr/local/bin/codex" {
+		t.Fatalf("expected codex binary, got %+v", spec)
 	}
 }
 
-func TestCodexRunnerCommandSpecFallsBackToNpx(t *testing.T) {
+func TestCodexRunnerCommandSpecUsesExplicitCommand(t *testing.T) {
 	runner := CodexRunner{
-		LookPath: func(name string) (string, error) {
-			switch name {
-			case "npx":
-				return "/usr/bin/npx", nil
-			default:
-				return "", errors.New("not found")
-			}
-		},
+		Command: "/tmp/custom-codex",
+		Args:    []string{"--profile", "relay"},
 	}
 
 	spec, err := runner.commandSpec()
 	if err != nil {
 		t.Fatalf("commandSpec: %v", err)
 	}
-	if spec.Command != "npx" {
-		t.Fatalf("expected npx fallback, got %+v", spec)
+	if spec.Command != "/tmp/custom-codex" {
+		t.Fatalf("expected explicit command, got %+v", spec)
 	}
-	if len(spec.Args) < 2 || spec.Args[1] != "@zed-industries/codex-acp@latest" {
-		t.Fatalf("unexpected npx args: %+v", spec.Args)
-	}
-}
-
-func TestCodexRunnerRunViaACPBridge(t *testing.T) {
-	testFile := filepath.Join(t.TempDir(), "agent-output.txt")
-	t.Setenv("GO_WANT_HELPER_ACP_AGENT", "1")
-	t.Setenv("ACP_TEST_FILE", testFile)
-
-	runner := CodexRunner{
-		Command: os.Args[0],
-		Args:    []string{"-test.run=TestHelperACPAgentProcess", "--"},
-	}
-	result, err := runner.Run(context.Background(), AgentRunRequest{
-		Phase:    "coding",
-		RepoPath: t.TempDir(),
-		Prompt:   "hello from relay",
-		IssueID:  "issue-1",
-		LoopID:   "loop-01",
-	})
-	if err != nil {
-		t.Fatalf("Run: %v\nstderr=%s", err, result.Stderr)
-	}
-	if result.ExitCode != 0 {
-		t.Fatalf("expected zero exit code, got %d", result.ExitCode)
-	}
-	data, err := os.ReadFile(testFile)
-	if err != nil {
-		t.Fatalf("read ACP-written file: %v", err)
-	}
-	if string(data) != "written by helper agent" {
-		t.Fatalf("unexpected ACP-written file contents: %q", string(data))
+	if len(spec.Args) != 2 || spec.Args[0] != "--profile" || spec.Args[1] != "relay" {
+		t.Fatalf("unexpected explicit args: %+v", spec.Args)
 	}
 }
 
-func TestHelperACPAgentProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_ACP_AGENT") != "1" {
-		return
-	}
-
-	agent := &helperACPAgent{testFile: os.Getenv("ACP_TEST_FILE")}
-	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
-	agent.conn = conn
-	<-conn.Done()
-	os.Exit(0)
-}
-
-type helperACPAgent struct {
-	conn     *acp.AgentSideConnection
-	testFile string
-}
-
-func (a *helperACPAgent) Authenticate(context.Context, acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, nil
-}
-
-func (a *helperACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession: false,
-		},
-		AuthMethods: []acp.AuthMethod{},
-	}, nil
-}
-
-func (a *helperACPAgent) Cancel(context.Context, acp.CancelNotification) error {
-	return nil
-}
-
-func (a *helperACPAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.NewSessionResponse{SessionId: "session-1"}, nil
-}
-
-func (a *helperACPAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
-	if _, err := a.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
-		SessionId: params.SessionId,
-		Path:      a.testFile,
-		Content:   "written by helper agent",
-	}); err != nil {
-		return acp.PromptResponse{}, err
-	}
-	term, err := a.conn.CreateTerminal(ctx, acp.CreateTerminalRequest{
-		SessionId: params.SessionId,
-		Command:   "/bin/sh",
-		Args:      []string{"-c", "printf terminal-ok"},
-		Cwd:       acp.Ptr("/"),
-	})
-	if err != nil {
-		return acp.PromptResponse{}, err
-	}
-	waitResp, err := a.conn.WaitForTerminalExit(ctx, acp.WaitForTerminalExitRequest{
-		SessionId:  params.SessionId,
-		TerminalId: term.TerminalId,
-	})
-	if err != nil {
-		return acp.PromptResponse{}, err
-	}
-	out, err := a.conn.TerminalOutput(ctx, acp.TerminalOutputRequest{
-		SessionId:  params.SessionId,
-		TerminalId: term.TerminalId,
-	})
-	if err != nil {
-		return acp.PromptResponse{}, err
-	}
-	_ = waitResp
-	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
-		SessionId: params.SessionId,
-		Update:    acp.UpdateAgentMessageText("helper:" + out.Output),
-	}); err != nil {
-		return acp.PromptResponse{}, err
-	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-}
-
-func (a *helperACPAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
-}
-
-var _ acp.Agent = (*helperACPAgent)(nil)
-
-func TestCodexRunnerCommandSpecErrorsWithoutBridge(t *testing.T) {
+func TestCodexRunnerCommandSpecErrorsWithoutCodex(t *testing.T) {
 	runner := CodexRunner{
 		LookPath: func(name string) (string, error) {
 			return "", errors.New("not found")
 		},
 	}
 	if _, err := runner.commandSpec(); err == nil {
-		t.Fatalf("expected missing bridge error")
+		t.Fatalf("expected missing codex error")
 	}
 }
 
-func TestACPClientTerminalLifecycle(t *testing.T) {
-	client := newACPClient(AgentRunRequest{})
-	createResp, err := client.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
-		SessionId: "session-1",
-		Command:   "/bin/sh",
-		Args:      []string{"-c", "printf terminal-lifecycle"},
-		Cwd:       acp.Ptr("/"),
+func TestCodexRunnerRunDirectCLI(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	recordPath := filepath.Join(tempDir, "args.txt")
+	promptPath := filepath.Join(tempDir, "prompt.txt")
+	pwdPath := filepath.Join(tempDir, "pwd.txt")
+	codexPath := writeFakeCodex(t, tempDir)
+
+	t.Setenv("RUNNER_RECORD_FILE", recordPath)
+	t.Setenv("RUNNER_PROMPT_FILE", promptPath)
+	t.Setenv("RUNNER_PWD_FILE", pwdPath)
+	t.Setenv("RUNNER_STDOUT_TEXT", "runner-stdout")
+	t.Setenv("RUNNER_STDERR_TEXT", "runner-stderr")
+	t.Setenv("RUNNER_FINAL_TEXT", "runner-final")
+
+	var seenPID int
+	runner := CodexRunner{Command: codexPath}
+	result, err := runner.Run(context.Background(), AgentRunRequest{
+		Phase:    "coding",
+		RepoPath: repoPath,
+		Prompt:   "hello from relay",
+		IssueID:  "issue-1",
+		LoopID:   "loop-01",
+		OnPID: func(pid int) {
+			seenPID = pid
+		},
 	})
 	if err != nil {
-		t.Fatalf("CreateTerminal: %v", err)
+		t.Fatalf("Run: %v\nstderr=%s", err, result.Stderr)
 	}
-	if _, err := client.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{
-		SessionId:  "session-1",
-		TerminalId: createResp.TerminalId,
-	}); err != nil {
-		t.Fatalf("WaitForTerminalExit: %v", err)
+	if seenPID <= 0 {
+		t.Fatalf("expected runner to report process pid, got %d", seenPID)
 	}
-	output, err := client.TerminalOutput(context.Background(), acp.TerminalOutputRequest{
-		SessionId:  "session-1",
-		TerminalId: createResp.TerminalId,
-	})
+	if result.ExitCode != 0 {
+		t.Fatalf("expected zero exit code, got %d", result.ExitCode)
+	}
+	if result.Stdout != "runner-stdout" {
+		t.Fatalf("unexpected stdout: %q", result.Stdout)
+	}
+	if result.Stderr != "runner-stderr" {
+		t.Fatalf("unexpected stderr: %q", result.Stderr)
+	}
+	if result.FinalMessage != "runner-final" {
+		t.Fatalf("unexpected final message: %q", result.FinalMessage)
+	}
+
+	argsData, err := os.ReadFile(recordPath)
 	if err != nil {
-		t.Fatalf("TerminalOutput: %v", err)
+		t.Fatalf("read args file: %v", err)
 	}
-	if output.Output == "" {
-		t.Fatalf("expected terminal output")
+	argsText := string(argsData)
+	for _, fragment := range []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "-C", repoPath, "-"} {
+		if !strings.Contains(argsText, fragment) {
+			t.Fatalf("expected args to contain %q, got %q", fragment, argsText)
+		}
 	}
-	if _, err := client.ReleaseTerminal(context.Background(), acp.ReleaseTerminalRequest{
-		SessionId:  "session-1",
-		TerminalId: createResp.TerminalId,
-	}); err != nil {
-		t.Fatalf("ReleaseTerminal: %v", err)
+
+	promptData, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("read prompt file: %v", err)
 	}
+	if string(promptData) != "hello from relay" {
+		t.Fatalf("unexpected prompt contents: %q", string(promptData))
+	}
+
+	pwdData, err := os.ReadFile(pwdPath)
+	if err != nil {
+		t.Fatalf("read pwd file: %v", err)
+	}
+	if strings.TrimSpace(string(pwdData)) != repoPath {
+		t.Fatalf("expected command to run in repo path %q, got %q", repoPath, string(pwdData))
+	}
+}
+
+func writeFakeCodex(t *testing.T, dir string) string {
+	t.Helper()
+
+	scriptPath := filepath.Join(dir, "codex")
+	script := `#!/bin/sh
+set -eu
+
+: "${RUNNER_RECORD_FILE:?}"
+: "${RUNNER_PROMPT_FILE:?}"
+: "${RUNNER_PWD_FILE:?}"
+
+printf '%s\n' "$*" > "$RUNNER_RECORD_FILE"
+pwd > "$RUNNER_PWD_FILE"
+
+output_file=""
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		-C)
+			shift 2
+			;;
+		-o)
+			output_file="$2"
+			shift 2
+			;;
+		-)
+			cat > "$RUNNER_PROMPT_FILE"
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+
+printf '%s' "${RUNNER_STDOUT_TEXT:-runner-stdout}"
+printf '%s' "${RUNNER_STDERR_TEXT:-runner-stderr}" >&2
+if [ -n "$output_file" ]; then
+	printf '%s' "${RUNNER_FINAL_TEXT:-runner-final}" > "$output_file"
+fi
+`
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return scriptPath
 }

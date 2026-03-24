@@ -12,12 +12,26 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 )
 
 type Orchestrator struct {
 	Store  *Store
 	Shell  ShellRunner
 	Runner AgentRunner
+
+	mu      sync.Mutex
+	running map[string]*RunningTask
+}
+
+type RunningTask struct {
+	IssueID       string
+	PipelineName  string
+	Phase         string
+	CurrentLoop   int
+	WorkspacePath string
+	RepoPath      string
+	ActivePIDs    []int
 }
 
 func NewOrchestrator(store *Store, shell ShellRunner, runner AgentRunner) *Orchestrator {
@@ -25,6 +39,7 @@ func NewOrchestrator(store *Store, shell ShellRunner, runner AgentRunner) *Orche
 		Store:  store,
 		Shell:  shell,
 		Runner: runner,
+		running: map[string]*RunningTask{},
 	}
 }
 
@@ -32,6 +47,9 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 	issue.Status = IssueStatusRunning
 	issue.ArtifactDir = o.Store.IssueDir(issue.ID)
 	if err := o.Store.Ensure(); err != nil {
+		return issue, err
+	}
+	if err := o.setIssuePhase(&issue, "init", true); err != nil {
 		return issue, err
 	}
 	_ = o.Store.AppendEvent(issue.ID, "issue started")
@@ -50,7 +68,13 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("workspace created path=%s", workspacePath))
 
 	_ = o.Store.AppendEvent(issue.ID, "init_command started")
-	initResult, err := o.Shell.Run(ctx, workspacePath, pipeline.InitCommand)
+	initResult, err := o.Shell.Run(ctx, ShellRunRequest{
+		Workdir: workspacePath,
+		Command: pipeline.InitCommand,
+		OnStart: func(pid int) {
+			o.trackIssuePID(&issue, "init", pid)
+		},
+	})
 	if saveErr := o.Store.SaveRunLog(issue.ID, "init", initResult.Stdout, initResult.Stderr, ""); saveErr != nil {
 		return issue, saveErr
 	}
@@ -59,6 +83,13 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 		return o.failIssue(issue, err)
 	}
 	_ = o.Store.AppendEvent(issue.ID, "init_command completed")
+	if latest, stopped, err := o.finalizeExternalState(issue.ID); err != nil {
+		return o.failIssue(issue, err)
+	} else if stopped {
+		return latest, nil
+	} else {
+		issue = latest
+	}
 
 	repoPath, err := DiscoverRepoRoot(ctx, workspacePath)
 	if err != nil {
@@ -71,19 +102,30 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 	}
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("repo discovered path=%s", repoPath))
 
+	issue.Status = IssueStatusPlanning
+	if err := o.setIssuePhase(&issue, "plan", true); err != nil {
+		return issue, err
+	}
 	if err := o.runPlanning(ctx, pipeline, &issue); err != nil {
+		if latest, stopped, stopErr := o.finalizeExternalState(issue.ID); stopErr != nil {
+			return o.failIssue(issue, stopErr)
+		} else if stopped {
+			return latest, nil
+		}
 		return o.failIssue(issue, err)
 	}
-	if latest, interrupted, err := o.finalizeInterruptIfRequested(issue.ID); err != nil {
+	if latest, stopped, err := o.finalizeExternalState(issue.ID); err != nil {
 		return o.failIssue(issue, err)
-	} else if interrupted {
-		_ = o.Store.AppendEvent(issue.ID, "issue interrupted after current run")
+	} else if stopped {
 		return latest, nil
+	} else {
+		issue = latest
 	}
 
 	for loop := 1; loop <= pipeline.LoopNum; loop++ {
+		issue.Status = IssueStatusRunning
 		issue.CurrentLoop = loop
-		if err := o.Store.SaveIssue(issue); err != nil {
+		if err := o.setIssuePhase(&issue, "coding", true); err != nil {
 			return issue, err
 		}
 		done, err := o.runCodingLoop(ctx, pipeline, &issue, loop)
@@ -93,10 +135,9 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 				return issue, saveErr
 			}
 		}
-		if latest, interrupted, err := o.finalizeInterruptIfRequested(issue.ID); err != nil {
+		if latest, stopped, err := o.finalizeExternalState(issue.ID); err != nil {
 			return o.failIssue(issue, err)
-		} else if interrupted {
-			_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("issue interrupted after loop=%d", loop))
+		} else if stopped {
 			return latest, nil
 		} else {
 			issue = latest
@@ -108,7 +149,7 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 		if done {
 			issue.Status = IssueStatusDone
 			issue.LastError = ""
-			if err := o.Store.SaveIssue(issue); err != nil {
+			if err := o.clearIssueRuntime(&issue); err != nil {
 				return issue, err
 			}
 			_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("issue completed loop=%d", loop))
@@ -134,6 +175,9 @@ func (o *Orchestrator) runPlanning(ctx context.Context, pipeline Pipeline, issue
 		Prompt:   prompt,
 		IssueID:  issue.ID,
 		LoopID:   "plan",
+		OnPID: func(pid int) {
+			o.trackIssuePID(issue, "plan", pid)
+		},
 	})
 	if saveErr := o.Store.SaveRunLog(issue.ID, "plan", result.Stdout, result.Stderr, result.FinalMessage); saveErr != nil {
 		return saveErr
@@ -184,6 +228,9 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 		Prompt:   prompt,
 		IssueID:  issue.ID,
 		LoopID:   loopID,
+		OnPID: func(pid int) {
+			o.trackIssuePID(issue, "coding", pid)
+		},
 	})
 	if saveErr := o.Store.SaveRunLog(issue.ID, loopID, result.Stdout, result.Stderr, result.FinalMessage); saveErr != nil {
 		return false, saveErr
@@ -230,17 +277,27 @@ func (o *Orchestrator) createWorkspace(issueID string) (string, error) {
 func (o *Orchestrator) failIssue(issue Issue, err error) (Issue, error) {
 	issue.Status = IssueStatusFailed
 	issue.LastError = err.Error()
-	_ = o.Store.SaveIssue(issue)
+	_ = o.clearIssueRuntime(&issue)
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("issue failed: %v", err))
 	return issue, err
 }
 
-func (o *Orchestrator) finalizeInterruptIfRequested(issueID string) (Issue, bool, error) {
+func (o *Orchestrator) finalizeExternalState(issueID string) (Issue, bool, error) {
 	latest, err := o.Store.LoadIssue(issueID)
 	if err != nil {
 		return Issue{}, false, err
 	}
 	if latest.Status == IssueStatusInterrupted {
+		if err := o.clearIssueRuntime(&latest); err != nil {
+			return Issue{}, false, err
+		}
+		return latest, true, nil
+	}
+	if latest.Status == IssueStatusFailed || latest.Status == IssueStatusDeleted {
+		if err := o.clearIssueRuntime(&latest); err != nil {
+			return Issue{}, false, err
+		}
+		_ = o.Store.AppendEvent(issueID, fmt.Sprintf("issue stopped with status=%s", latest.Status))
 		return latest, true, nil
 	}
 	if !latest.InterruptRequested {
@@ -249,11 +306,105 @@ func (o *Orchestrator) finalizeInterruptIfRequested(issueID string) (Issue, bool
 	latest.Status = IssueStatusInterrupted
 	latest.LastError = "interrupted by user"
 	latest.InterruptRequested = false
-	if err := o.Store.SaveIssue(latest); err != nil {
+	if err := o.clearIssueRuntime(&latest); err != nil {
 		return Issue{}, false, err
 	}
 	_ = o.Store.AppendEvent(issueID, "interrupt request finalized")
 	return latest, true, nil
+}
+
+func (o *Orchestrator) RunningIssue(issueID string) (RunningTask, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	task, ok := o.running[issueID]
+	if !ok {
+		return RunningTask{}, false
+	}
+	return copyRunningTask(task), true
+}
+
+func (o *Orchestrator) setIssuePhase(issue *Issue, phase string, resetPIDs bool) error {
+	o.mu.Lock()
+	task := o.running[issue.ID]
+	if task == nil {
+		task = &RunningTask{IssueID: issue.ID}
+		o.running[issue.ID] = task
+	}
+	task.PipelineName = issue.PipelineName
+	task.Phase = phase
+	task.CurrentLoop = issue.CurrentLoop
+	task.WorkspacePath = issue.WorkspacePath
+	task.RepoPath = issue.RepoPath
+	if resetPIDs {
+		task.ActivePIDs = nil
+	}
+	issue.ActivePhase = task.Phase
+	issue.ActivePIDs = append([]int(nil), task.ActivePIDs...)
+	o.mu.Unlock()
+	return o.Store.SaveIssue(*issue)
+}
+
+func (o *Orchestrator) trackIssuePID(issue *Issue, phase string, pid int) {
+	if pid <= 0 {
+		return
+	}
+
+	o.mu.Lock()
+	task := o.running[issue.ID]
+	if task == nil {
+		task = &RunningTask{IssueID: issue.ID}
+		o.running[issue.ID] = task
+	}
+	task.PipelineName = issue.PipelineName
+	task.Phase = phase
+	task.CurrentLoop = issue.CurrentLoop
+	task.WorkspacePath = issue.WorkspacePath
+	task.RepoPath = issue.RepoPath
+	if !containsPID(task.ActivePIDs, pid) {
+		task.ActivePIDs = append(task.ActivePIDs, pid)
+	}
+	issue.ActivePhase = task.Phase
+	issue.ActivePIDs = append([]int(nil), task.ActivePIDs...)
+	o.mu.Unlock()
+
+	if err := o.Store.SaveIssue(*issue); err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("runtime pid persistence failed: %v", err))
+	}
+}
+
+func (o *Orchestrator) clearIssueRuntime(issue *Issue) error {
+	o.mu.Lock()
+	delete(o.running, issue.ID)
+	o.mu.Unlock()
+
+	issue.ActivePhase = ""
+	issue.ActivePIDs = nil
+	return o.Store.SaveIssue(*issue)
+}
+
+func copyRunningTask(task *RunningTask) RunningTask {
+	if task == nil {
+		return RunningTask{}
+	}
+	return RunningTask{
+		IssueID:       task.IssueID,
+		PipelineName:  task.PipelineName,
+		Phase:         task.Phase,
+		CurrentLoop:   task.CurrentLoop,
+		WorkspacePath: task.WorkspacePath,
+		RepoPath:      task.RepoPath,
+		ActivePIDs:    append([]int(nil), task.ActivePIDs...),
+	}
+}
+
+func containsPID(pids []int, pid int) bool {
+	for _, existing := range pids {
+		if existing == pid {
+			return true
+		}
+	}
+	return false
 }
 
 func DiscoverRepoRoot(ctx context.Context, workspacePath string) (string, error) {

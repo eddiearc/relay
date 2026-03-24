@@ -19,8 +19,31 @@ Requirements:
 - Create or initialize progress.txt at PROGRESS_PATH.
 - feature_list.json is the only source of truth for completion.
 - progress.txt is the handoff log for future runs.
+- FEATURE_LIST_PATH is outside REPO_PATH. Do not use apply_patch with an absolute path for it.
+- Write FEATURE_LIST_PATH and PROGRESS_PATH via shell commands or another file-writing method that works with absolute paths.
+- Do not create extra planning files such as task_plan.md, notes.md, or docs/plans/*.
 - Write files directly; do not only describe them in your response.
-- Validate that feature_list.json is valid JSON and non-empty before finishing.`
+- feature_list.json must be exactly a JSON array.
+- Every item in feature_list.json must have exactly these JSON fields:
+  - id: string
+  - title: string
+  - description: string
+  - priority: positive integer
+  - passes: boolean
+  - notes: string
+- During planning, initialize every passes value to false.
+- Example feature_list.json:
+  [
+    {
+      "id": "feature-1",
+      "title": "Example title",
+      "description": "Example description",
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+- Validate that feature_list.json parses as JSON, is a non-empty array, and matches the schema above before finishing.`
 	codingHarnessContract = `You are the coding phase of Relay.
 
 You must work inside the repository, but all task artifacts live outside the repository at the absolute paths provided below.
@@ -31,6 +54,9 @@ Requirements:
 - feature_list.json is the only source of truth for completion.
 - Do not remove existing features.
 - Do not change any feature passes value from true back to false.
+- FEATURE_LIST_PATH and PROGRESS_PATH are outside REPO_PATH. Do not use apply_patch with absolute paths for them.
+- Update FEATURE_LIST_PATH and PROGRESS_PATH via shell commands or another file-writing method that works with absolute paths.
+- FEATURE_LIST_PATH must remain a JSON array whose items use exactly these fields: id, title, description, priority, passes, notes.
 - Make code changes in REPO_PATH as needed.
 - If you modify repository code, commit those repo changes before finishing.`
 )

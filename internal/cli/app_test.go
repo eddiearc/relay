@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/eddiearc/relay/internal/relay"
 )
@@ -199,6 +201,36 @@ func TestIssueInterruptRequestsStopForRunningIssue(t *testing.T) {
 	}
 }
 
+func TestRecoverActiveIssuesMarksOrphanedRunsTodo(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-recover")
+	saveIssueSnapshot(t, stateDir, relay.Issue{
+		ID:           "issue-recover",
+		PipelineName: "demo-recover",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusRunning,
+		ActivePhase:  "coding",
+		ActivePIDs:   []int{12345},
+	})
+
+	store := relay.NewStore(stateDir)
+	recovered, err := recoverActiveIssues(store)
+	if err != nil {
+		t.Fatalf("recoverActiveIssues: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered issue, got %d", recovered)
+	}
+	issue := loadIssueSnapshot(t, stateDir, "issue-recover")
+	if issue.Status != relay.IssueStatusTodo {
+		t.Fatalf("expected todo after recovery, got %q", issue.Status)
+	}
+	if issue.ActivePhase != "" || len(issue.ActivePIDs) != 0 {
+		t.Fatalf("expected active runtime fields to be cleared, got phase=%q pids=%v", issue.ActivePhase, issue.ActivePIDs)
+	}
+}
+
 func TestPipelineDeleteFailsWhenIssueRunning(t *testing.T) {
 	stateDir := t.TempDir()
 	importTestPipeline(t, stateDir, "demo-pipeline-running-delete")
@@ -295,6 +327,54 @@ func TestReportListsArtifactsAndEventsLog(t *testing.T) {
 	}
 }
 
+func TestKillTerminatesTrackedIssueProcesses(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-kill")
+
+	cmd := exec.Command("zsh", "-lc", "sleep 30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+
+	saveIssueSnapshot(t, stateDir, relay.Issue{
+		ID:           "issue-kill",
+		PipelineName: "demo-kill",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusRunning,
+		ActivePhase:  "coding",
+		ActivePIDs:   []int{cmd.Process.Pid},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"kill", "-issue", "issue-kill", "-state-dir", stateDir}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("kill failed: %s", stderr.String())
+	}
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- cmd.Wait()
+	}()
+	select {
+	case <-time.After(3 * time.Second):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		t.Fatalf("expected process %d to exit after kill", cmd.Process.Pid)
+	case <-waitDone:
+	}
+
+	issue := loadIssueSnapshot(t, stateDir, "issue-kill")
+	if issue.Status != relay.IssueStatusFailed {
+		t.Fatalf("expected failed issue after kill, got %q", issue.Status)
+	}
+	if issue.ActivePhase != "" || len(issue.ActivePIDs) != 0 {
+		t.Fatalf("expected runtime fields to be cleared after kill, got phase=%q pids=%v", issue.ActivePhase, issue.ActivePIDs)
+	}
+}
+
 func importTestPipeline(t *testing.T, stateDir, name string) {
 	t.Helper()
 	pipelineFile := writeTempFile(t, "pipeline.yaml", ""+
@@ -318,6 +398,16 @@ func saveIssueSnapshot(t *testing.T, stateDir string, issue relay.Issue) {
 	if err := store.SaveIssue(issue); err != nil {
 		t.Fatalf("save issue: %v", err)
 	}
+}
+
+func loadIssueSnapshot(t *testing.T, stateDir, issueID string) relay.Issue {
+	t.Helper()
+	store := relay.NewStore(stateDir)
+	issue, err := store.LoadIssue(issueID)
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	return issue
 }
 
 func writeTempFile(t *testing.T, name, content string) string {

@@ -383,6 +383,114 @@ func TestOrchestratorContinuesAfterCodingLoopPanic(t *testing.T) {
 	}
 }
 
+func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
+	requireGit(t)
+
+	root := t.TempDir()
+	store := NewStore(filepath.Join(root, ".relay"))
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	pipeline, issue := testRunInput()
+	pipeline.LoopNum = 1
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	doneCh := make(chan struct{})
+	var runIssue Issue
+	var runErr error
+
+	orchestrator := NewOrchestrator(store, ZshRunner{}, &fakeAgentRunner{
+		t: t,
+		plan: func(req AgentRunRequest) {
+			artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+			writeFeatureList(t, artifactDir, []FeatureItem{
+				{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
+			})
+			appendProgress(t, artifactDir, "planning complete")
+			if req.OnPID != nil {
+				req.OnPID(41001)
+			}
+		},
+		coding: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				if req.OnPID != nil {
+					req.OnPID(41002)
+				}
+				close(started)
+				<-release
+
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+				writeFeatureList(t, artifactDir, []FeatureItem{
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
+				})
+				appendProgress(t, artifactDir, "loop 1 complete")
+				writeRepoChangeAndCommit(t, req.RepoPath, "done.txt", "done\n", "feat: finish feature")
+			},
+		},
+	})
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	go func() {
+		defer close(doneCh)
+		runIssue, runErr = orchestrator.RunIssue(context.Background(), pipeline, issue)
+	}()
+
+	<-started
+
+	task, ok := orchestrator.RunningIssue(issue.ID)
+	if !ok {
+		t.Fatalf("expected running task to be tracked")
+	}
+	if task.Phase != "coding" {
+		t.Fatalf("expected coding phase, got %q", task.Phase)
+	}
+	if task.CurrentLoop != 1 {
+		t.Fatalf("expected loop 1, got %d", task.CurrentLoop)
+	}
+	if task.WorkspacePath == "" || task.RepoPath == "" {
+		t.Fatalf("expected tracked paths, got workspace=%q repo=%q", task.WorkspacePath, task.RepoPath)
+	}
+	if !containsPID(task.ActivePIDs, 41002) {
+		t.Fatalf("expected tracked pid 41002, got %v", task.ActivePIDs)
+	}
+
+	latest, err := store.LoadIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("LoadIssue: %v", err)
+	}
+	if latest.ActivePhase != "coding" {
+		t.Fatalf("expected persisted coding phase, got %q", latest.ActivePhase)
+	}
+	if !containsPID(latest.ActivePIDs, 41002) {
+		t.Fatalf("expected persisted pid 41002, got %v", latest.ActivePIDs)
+	}
+	if latest.RepoPath == "" || latest.WorkspacePath == "" {
+		t.Fatalf("expected persisted paths, got workspace=%q repo=%q", latest.WorkspacePath, latest.RepoPath)
+	}
+
+	close(release)
+	<-doneCh
+
+	if runErr != nil {
+		t.Fatalf("RunIssue failed: %v", runErr)
+	}
+	if runIssue.Status != IssueStatusDone {
+		t.Fatalf("expected done issue, got %q", runIssue.Status)
+	}
+	if _, ok := orchestrator.RunningIssue(issue.ID); ok {
+		t.Fatalf("expected running task to be cleared after completion")
+	}
+}
+
 func TestDiscoverRepoRootFallsBackToSingleGitDirectory(t *testing.T) {
 	workspace := t.TempDir()
 	repoPath := filepath.Join(workspace, "app")

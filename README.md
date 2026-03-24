@@ -31,8 +31,8 @@ Workspaces are stored separately under `~/relay-workspaces/` by default. You can
 override the workspace root with `RELAY_WORKSPACE_ROOT` or `relay serve
 --workspace-root ...`.
 
-Codex execution now goes through an ACP bridge. Relay looks for `codex-acp`
-first, then falls back to `npx -y @zed-industries/codex-acp@latest`.
+Relay now executes Codex directly through the local `codex` CLI. `codex` must
+be installed and available in `PATH`.
 
 ## Pipeline
 
