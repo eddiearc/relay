@@ -27,6 +27,7 @@ Commands:
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
+  version  Show build version information
   help     Show this help text
 `
 
@@ -72,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReport(args[1:], stdout, stderr)
 	case "kill":
 		return runKill(args[1:], stdout, stderr)
+	case "version":
+		return runVersion(stdout)
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usage)
 		return 0
@@ -79,6 +82,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 1
 	}
+}
+
+func runVersion(stdout io.Writer) int {
+	_, _ = fmt.Fprintf(stdout, "relay %s\ncommit: %s\nbuilt: %s\n", version, commit, buildDate)
+	return 0
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {

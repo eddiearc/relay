@@ -1,0 +1,43 @@
+name: Release Build
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  release:
+    name: Build and Upload Release Assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository at release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
+      - name: Run tests
+        run: make test
+
+      - name: Build release archives
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: make package-all VERSION="$VERSION"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: dist/*.tar.gz

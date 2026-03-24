@@ -191,6 +191,55 @@ relay serve --once
 - `relay status -issue <issue-id>`
 - `relay report -issue <issue-id>`
 - `relay kill -issue <issue-id>`
+- `relay version`
+
+### Build and Release
+
+Build the local CLI binary:
+
+```bash
+make build
+```
+
+Show the embedded build metadata:
+
+```bash
+./bin/relay version
+```
+
+Create a local release archive for the current platform:
+
+```bash
+make package
+```
+
+Build all release archives that match CI:
+
+```bash
+make package-all
+```
+
+Versioning is controlled by git tags in CI. The GitHub Actions workflow:
+
+- reuses the local `Makefile`, so CI and local packaging stay aligned
+- runs only when a GitHub Release is published
+- runs `make test`
+- runs `make package-all VERSION=<release-tag>`
+- uploads `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` archives to that release
+
+If you want a local build with explicit version metadata, use:
+
+```bash
+make package VERSION=v0.1.0
+```
+
+To trigger packaging in GitHub, publish a release for a tag such as `v0.1.0`. For example:
+
+```bash
+gh release create v0.1.0 --generate-notes
+```
+
+Windows packages are not published yet because the current runtime assumes Unix tools such as `zsh` and `SIGKILL`.
 
 ### Scope
 
@@ -553,6 +602,55 @@ relay serve --once
 - `relay status -issue <issue-id>`
 - `relay report -issue <issue-id>`
 - `relay kill -issue <issue-id>`
+- `relay version`
+
+### 构建与发版
+
+当前项目本地快速打包优先走 Makefile：
+
+```bash
+make build
+```
+
+查看二进制里写入的版本信息：
+
+```bash
+./bin/relay version
+```
+
+给当前平台生成一个本地发布压缩包：
+
+```bash
+make package
+```
+
+一次性打出和 CI 一样的全部发布包：
+
+```bash
+make package-all
+```
+
+版本号本身不放在源码常量里硬编码，默认由 CI 读取 git tag 注入。仓库里的 GitHub Actions 会：
+
+- 直接复用本地 `Makefile`，保证本地和 CI 的打包逻辑一致
+- 只在 GitHub Release 发布时触发，避免日常 push 频繁触发
+- 先执行 `make test`
+- 再执行 `make package-all VERSION=<release-tag>`
+- 最后把 `linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64` 四个压缩包上传到这个 release
+
+如果你想在本地手动指定版本号，也可以这样打包：
+
+```bash
+make package VERSION=v0.1.0
+```
+
+如果你想在 GitHub 上发起正式打包，直接发布一个 release 即可，比如：
+
+```bash
+gh release create v0.1.0 --generate-notes
+```
+
+当前还不建议发 Windows 包，因为运行时里有 `zsh` 和 `SIGKILL` 这样的 Unix 假设。
 
 ### Scope
 

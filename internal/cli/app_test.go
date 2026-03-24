@@ -36,6 +36,48 @@ func TestResolveStateDirResolvesRelativePath(t *testing.T) {
 	}
 }
 
+func TestHelpIncludesVersionCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	exitCode := run([]string{"help"}, &stdout, io.Discard)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("version")) {
+		t.Fatalf("expected help output to include version command, got %s", stdout.String())
+	}
+}
+
+func TestVersionCommandPrintsInjectedBuildMetadata(t *testing.T) {
+	previousVersion := version
+	previousCommit := commit
+	previousDate := buildDate
+	version = "v1.2.3"
+	commit = "abc1234"
+	buildDate = "2026-03-24T12:34:56Z"
+	t.Cleanup(func() {
+		version = previousVersion
+		commit = previousCommit
+		buildDate = previousDate
+	})
+
+	var stdout bytes.Buffer
+	exitCode := run([]string{"version"}, &stdout, io.Discard)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"relay v1.2.3",
+		"commit: abc1234",
+		"built: 2026-03-24T12:34:56Z",
+	} {
+		if !bytes.Contains([]byte(output), []byte(want)) {
+			t.Fatalf("expected version output to contain %q, got %s", want, output)
+		}
+	}
+}
+
 func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	stateDir := t.TempDir()
 	planPrompt := writeTempFile(t, "plan.txt", "plan {{issue}}")
