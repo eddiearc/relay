@@ -1,6 +1,6 @@
 # Relay
 
-[English](./README.md)
+[English](./README.md) | 中文
 
 ### 项目简介
 

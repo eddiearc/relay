@@ -1,6 +1,6 @@
 # Relay
 
-[中文](./README.zh-CN.md)
+English | [中文](./README.zh-CN.md)
 
 ### What Relay Is
 
