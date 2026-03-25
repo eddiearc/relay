@@ -1,6 +1,11 @@
 package relay
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestIssueCreateNormalizeDefaults(t *testing.T) {
 	issue := Issue{
@@ -46,5 +51,27 @@ func TestIssueNormalizeGeneratesID(t *testing.T) {
 	}
 	if issue.Status != IssueStatusTodo {
 		t.Fatalf("expected todo status, got %q", issue.Status)
+	}
+}
+
+func TestLoadPipelineRejectsUnknownProjectField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pipeline.yaml")
+	data := `name: demo
+project:
+  key: github.com/example/repo
+init_command: git clone repo .
+plan_prompt: plan
+coding_prompt: code
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+
+	_, err := LoadPipeline(path)
+	if err == nil {
+		t.Fatal("expected unknown project field to fail")
+	}
+	if !strings.Contains(err.Error(), "project") {
+		t.Fatalf("expected error to mention project field, got %v", err)
 	}
 }

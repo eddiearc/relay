@@ -25,9 +25,9 @@ Do not use this for unit tests or fast local feedback. This is a slower, scenari
 The current repository must contain:
 
 - `e2e/scenario.yaml`
-- `e2e/plan_prompt.txt`
-- `e2e/coding_prompt.txt`
-- `e2e/verify_prompt.txt`
+- `e2e/plan_prompt.md`
+- `e2e/coding_prompt.md`
+- `e2e/verify_prompt.md`
 
 If any are missing, stop and report the missing file.
 
@@ -66,8 +66,8 @@ The temporary pipeline must embed:
 - `name`
 - `init_command`
 - `loop_num`
-- `plan_prompt` loaded from `e2e/plan_prompt.txt`
-- `coding_prompt` loaded from `e2e/coding_prompt.txt`
+- `plan_prompt` loaded from `e2e/plan_prompt.md`
+- `coding_prompt` loaded from `e2e/coding_prompt.md`
 
 The temporary issue must embed:
 - `id`
@@ -107,7 +107,7 @@ Always record the absolute issue artifact directory in the final report.
 
 ### 6. Perform Independent Verification
 
-Read `e2e/verify_prompt.txt`, then perform a separate verification pass against the produced repository.
+Read `e2e/verify_prompt.md`, then perform a separate verification pass against the produced repository.
 
 Use the current agent as the verifier. Do not treat the execution agent's self-report as sufficient proof.
 

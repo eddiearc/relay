@@ -60,6 +60,242 @@ func TestHelpIncludesUpgradeCommand(t *testing.T) {
 	}
 }
 
+func TestTopLevelHelpIncludesWorkflowGuidance(t *testing.T) {
+	var stdout bytes.Buffer
+	exitCode := run([]string{"help"}, &stdout, io.Discard)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Workflow:",
+		"relay help",
+		"relay version",
+		"relay help pipeline",
+		"relay help issue",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected help output to contain %q, got %s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"relay help pipeline match",
+		"relay help issue evaluate",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected help output to omit %q, got %s", unwanted, output)
+		}
+	}
+}
+
+func TestPipelineHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "pipeline"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"manage persisted pipelines",
+		"relay pipeline import -file pipeline.yaml",
+		"relay pipeline template",
+		"relay help pipeline <subcommand>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline help output to contain %q, got %s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"match",
+		"project metadata",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected pipeline help output to omit %q, got %s", unwanted, output)
+		}
+	}
+}
+
+func TestPipelineAddHelpMatchesDetailedUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "add", "--help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"create a pipeline from flags and prompt files",
+		"--init-command",
+		"--plan-prompt-file",
+		"--coding-prompt-file",
+		"15 is a reasonable upper bound",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline add help output to contain %q, got %s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"--project-key",
+		"--project-path",
+		"--project-remote-url",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected pipeline add help output to omit %q, got %s", unwanted, output)
+		}
+	}
+}
+
+func TestPipelineTemplateHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "pipeline", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"print a complete pipeline YAML template",
+		"relay pipeline template > pipeline.yaml",
+		"Template:",
+		"name: repo-name",
+		"coding_prompt:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline template help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestPipelineTemplateCommandPrintsTemplate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"name: repo-name",
+		"init_command:",
+		"plan_prompt:",
+		"coding_prompt:",
+		"Ensure the branch has an open pull request",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline template output to contain %q, got %s", want, output)
+		}
+	}
+	if strings.Contains(output, "project:") {
+		t.Fatalf("expected pipeline template output to omit project block, got %s", output)
+	}
+}
+
+func TestIssueHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "issue"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"manage persisted issues",
+		"relay issue add --pipeline demo",
+		"relay issue template",
+		"relay help issue <subcommand>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue help output to contain %q, got %s", want, output)
+		}
+	}
+	if strings.Contains(output, "evaluate") {
+		t.Fatalf("expected issue help output to omit evaluate, got %s", output)
+	}
+}
+
+func TestIssueAddHelpMatchesDetailedUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"issue", "add", "--help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"create an issue from flags",
+		"--pipeline",
+		"--goal",
+		"--description",
+		"feature_list.json rules",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue add help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestIssueTemplateHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "issue", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"print a complete issue JSON template",
+		"relay issue template > issue.json",
+		"Template:",
+		"\"pipeline_name\": \"repo-name\"",
+		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue template help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestIssueTemplateCommandPrintsTemplate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"issue", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"\"pipeline_name\": \"repo-name\"",
+		"\"goal\": \"Describe the end state in one sentence.\"",
+		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue template output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestServeHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"serve", "--help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"start the polling orchestrator",
+		"--once",
+		"--poll-interval",
+		"Recommended startup sequence:",
+		"Diagnostic workflow:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected serve help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
 func TestUpgradeHelp(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

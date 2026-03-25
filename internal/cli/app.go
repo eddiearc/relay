@@ -21,27 +21,518 @@ var usage = `relay is a goal-driven supervisor CLI.
 
 Usage:
   relay <command> [arguments]
+  relay help [command] [subcommand]
+
+Workflow:
+  1. relay help
+  2. relay version
+  3. relay upgrade --check
+  4. relay help pipeline
+  5. relay help issue
+  6. relay serve --once
+
+Examples:
+  relay help
+  relay version
+  relay upgrade --check
+  relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
+  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay serve --once
+  relay watch -issue issue-123
+  relay status -issue issue-123
+  relay report -issue issue-123
 
 Commands:
   serve    Start the polling orchestrator
-  pipeline Add a persisted pipeline
-  issue    Add or inspect issues
+  watch    Follow one issue's persisted state and logs
+  pipeline Create, inspect, and print pipeline templates
+  issue    Create, inspect, and print issue templates
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
   upgrade  Upgrade the relay CLI
   version  Show build version information
-  help     Show this help text
+  help     Show detailed help for a command or subcommand
+
+More help:
+  relay help serve
+  relay help watch
+  relay help pipeline add
+  relay help pipeline show
+  relay help pipeline template
+  relay help issue add
+  relay help issue template
+
+Skill refresh:
+  npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 `
 
 var upgradeUsage = `upgrade the relay CLI.
 
 Usage:
   relay upgrade
+  relay upgrade --check
 
 The command detects whether relay was installed via npm or go install and
 runs the matching self-update command. Local builds are not self-upgradable.
+
+With --check, Relay only reports:
+  - current version
+  - install method
+  - latest version
+  - recommended upgrade command
+  - skill refresh command
+
+Exit codes for --check:
+  0  already up to date
+  2  update available
+  1  check failed
+
+If you use the bundled relay-operator skill, refresh it separately with:
+  npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
+
+Examples:
+  relay upgrade
+  relay upgrade --check
 `
+
+var serveUsage = `start the polling orchestrator.
+
+Usage:
+  relay serve [flags]
+
+What it does:
+  - loads persisted pipelines and issues from the Relay state directory
+  - recovers orphaned active issues
+  - polls for todo issues
+  - runs planning once, then coding loops until completion or failure
+
+Recommended startup sequence:
+  1. relay serve --once
+  2. relay serve
+  3. move the service under nohup, launchd, systemd, or another supervisor only after foreground validation succeeds
+
+Mode selection:
+  - single pass for debugging: relay serve --once
+  - foreground validation: relay serve
+  - lightweight background process: nohup relay serve >> ~/.relay/logs/serve.log 2>&1 &
+  - production-style supervision: launchd, systemd, or another service manager
+
+Diagnostic workflow:
+  - relay issue list
+  - relay status -issue <issue-id>
+  - relay watch -issue <issue-id>
+  - relay report -issue <issue-id>
+  - inspect feature_list.json, progress.txt, events.log, and runs/ under the issue artifact directory
+  - confirm host process state with ps, launchctl, systemctl, or journalctl as appropriate
+
+Examples:
+  relay serve --once
+  relay serve --poll-interval 10s
+  relay serve --workspace-root /tmp/relay-workspaces
+`
+
+var pipelineUsage = `manage persisted pipelines.
+
+Usage:
+  relay pipeline <subcommand> [arguments]
+  relay help pipeline <subcommand>
+
+Subcommands:
+  add      Create a pipeline from flags and prompt files
+  edit     Update a saved pipeline
+  import   Import a pipeline from YAML
+  show     Print a saved pipeline with a readable summary
+  template Print a full pipeline YAML template
+  list     List saved pipelines
+  delete   Delete a saved pipeline
+
+Typical flow:
+  1. Start with "relay pipeline template" or prepare prompt files for "relay pipeline add".
+  2. Save it with "relay pipeline import -file pipeline.yaml" or "relay pipeline add ...".
+  3. Confirm it with "relay pipeline list".
+
+Before writing a pipeline, inspect:
+  - repository clone URL and default branch
+  - whether the repo is a monorepo
+  - package manager and build toolchain
+  - smallest verification commands that prove progress
+  - whether codegen, Docker, DB setup, env vars, or private registries are required
+
+Examples:
+  relay pipeline template
+  relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline edit demo --loop-num 15
+`
+
+var pipelineAddUsage = `create a pipeline from flags and prompt files.
+
+Usage:
+  relay pipeline add <name> --init-command <command> --plan-prompt-file <file> --coding-prompt-file <file> [flags]
+
+Required:
+  <name>                 Saved pipeline name
+  --init-command         Shell command that prepares a fresh issue workspace
+  --plan-prompt-file     Planner prompt template file
+  --coding-prompt-file   Coding prompt template file
+
+Pipeline rules:
+  - init_command should usually create a fresh workspace checkout
+  - prefer shallow clones unless the task needs history
+  - plan_prompt should force verifiable features and branch setup before coding
+  - coding_prompt should force evidence-based FEATURE_LIST_PATH updates and PROGRESS_PATH handoff entries
+  - real repo work should usually set loop_num explicitly; 15 is a reasonable upper bound
+
+Examples:
+  relay pipeline add demo \
+    --init-command 'git clone --depth 1 https://github.com/owner/repo .' \
+    --plan-prompt-file plan.md \
+    --coding-prompt-file coding.md
+`
+
+var pipelineEditUsage = `update a saved pipeline.
+
+Usage:
+  relay pipeline edit <name> [flags]
+
+What can be changed:
+  --init-command
+  --loop-num
+  --plan-prompt-file
+  --coding-prompt-file
+
+Examples:
+  relay pipeline edit demo --loop-num 15
+  relay pipeline edit demo --coding-prompt-file coding-v2.md
+`
+
+var pipelineImportUsage = `import a pipeline from YAML.
+
+Usage:
+  relay pipeline import -file <pipeline.yaml> [flags]
+
+Required pipeline YAML fields:
+  - name
+  - init_command
+  - plan_prompt
+  - coding_prompt
+
+Optional pipeline YAML fields:
+  - loop_num
+
+Use "relay pipeline template" to print a complete starting template.
+
+Examples:
+  relay pipeline import -file pipeline.yaml
+`
+
+var pipelineShowUsage = `print a saved pipeline with a readable summary.
+
+Usage:
+  relay pipeline show <name> [flags]
+
+What it prints:
+  - init strategy summary
+  - loop limit
+  - key plan and coding constraints
+  - full saved YAML
+
+Examples:
+  relay pipeline show demo
+`
+
+var pipelineTemplateUsage = `print a complete pipeline YAML template.
+
+Usage:
+  relay pipeline template
+
+What it prints:
+  - a full pipeline.yaml skeleton
+  - branch and PR guidance in the embedded prompts
+  - default loop_num guidance suitable for real repository work
+
+Examples:
+  relay pipeline template > pipeline.yaml
+`
+
+var pipelineListUsage = `list saved pipelines.
+
+Usage:
+  relay pipeline list [flags]
+
+Examples:
+  relay pipeline list
+`
+
+var pipelineDeleteUsage = `delete a saved pipeline.
+
+Usage:
+  relay pipeline delete <name> [flags]
+
+The command refuses to delete a pipeline that is still referenced by an active issue.
+
+Examples:
+  relay pipeline delete demo
+`
+
+var issueUsage = `manage persisted issues.
+
+Usage:
+  relay issue <subcommand> [arguments]
+  relay help issue <subcommand>
+
+Subcommands:
+  add        Create an issue from flags
+  edit       Update a saved issue
+  interrupt  Request interruption for a running issue
+  import     Import an issue from JSON
+  template   Print a full issue JSON template
+  list       List saved issues
+  delete     Mark an inactive issue as deleted
+
+Typical flow:
+  1. Start with "relay issue template" or write flags for "relay issue add".
+  2. Create or import an issue bound to an existing pipeline.
+  2. Run "relay serve --once" to validate the setup.
+  3. Inspect progress with "relay status" and "relay report".
+
+Issue writing rules:
+  - goal should describe the end state in one sentence
+  - description should preserve scope, constraints, non-goals, and verification signals
+  - acceptance criteria should come from observable commands, API behavior, UI behavior, files, or service events
+  - avoid vague criteria such as "implemented the logic" or "mostly done"
+
+Examples:
+  relay issue template
+  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay issue list
+  relay issue interrupt --id issue-123
+`
+
+var issueAddUsage = `create an issue from flags.
+
+Usage:
+  relay issue add --pipeline <name> --goal <goal> --description <description> [flags]
+
+Required:
+  --pipeline      Existing pipeline name
+  --goal          One-line end state
+  --description   Scope, constraints, and verification details
+
+Good description inputs include:
+  - verification commands such as go test ./..., npm run build, or tsc --noEmit
+  - expected API status codes or response bodies
+  - explicit non-goals and exclusions
+
+feature_list.json rules for downstream planning:
+  - Relay requires a JSON array
+  - each item must use exactly: id, title, description, priority, passes, notes
+  - passes can only become true after verification
+
+Examples:
+  relay issue add \
+    --pipeline demo \
+    --goal "Add CLI summary output" \
+    --description "Update the command output and verify with go test ./..."
+`
+
+var issueEditUsage = `update a saved issue.
+
+Usage:
+  relay issue edit --id <issue-id> [flags]
+
+Examples:
+  relay issue edit --id issue-123 --goal "Refine summary output"
+  relay issue edit --id issue-123 --description "Updated scope and verification commands"
+`
+
+var issueInterruptUsage = `interrupt an issue.
+
+Usage:
+  relay issue interrupt --id <issue-id> [flags]
+
+If the issue is active, Relay records an interrupt request and the worker loop will stop at the next safe boundary.
+If the issue is not active yet, Relay marks it interrupted immediately.
+
+Examples:
+  relay issue interrupt --id issue-123
+`
+
+var issueImportUsage = `import an issue from JSON.
+
+Usage:
+  relay issue import -file <issue.json> [flags]
+
+Use "relay issue template" to print a complete starting template.
+
+Examples:
+  relay issue import -file issue.json
+`
+
+var issueTemplateUsage = `print a complete issue JSON template.
+
+Usage:
+  relay issue template
+
+What it prints:
+  - a full issue.json skeleton
+  - the expected shape for goal and description inputs
+
+Examples:
+  relay issue template > issue.json
+`
+
+var issueListUsage = `list saved issues.
+
+Usage:
+  relay issue list [flags]
+
+Examples:
+  relay issue list
+`
+
+var issueDeleteUsage = `mark an inactive issue as deleted.
+
+Usage:
+  relay issue delete --id <issue-id> [flags]
+
+The command refuses to delete an active issue.
+
+Examples:
+  relay issue delete --id issue-123
+`
+
+var statusUsage = `show saved issue status.
+
+Usage:
+  relay status -issue <issue-id> [flags]
+
+What it prints:
+  - issue id
+  - status
+  - current loop number
+  - workspace path
+  - workdir path
+  - artifact directory
+  - active phase and pids when present
+  - last error and interrupt status when present
+
+Examples:
+  relay status -issue issue-123
+`
+
+var reportUsage = `print a saved issue report.
+
+Usage:
+  relay report -issue <issue-id> [flags]
+
+What it prints:
+  - the persisted issue JSON
+  - artifact paths for feature_list.json, progress.txt, and events.log
+  - run log file paths when available
+
+Examples:
+  relay report -issue issue-123
+`
+
+var killUsage = `mark a saved issue as failed and terminate tracked processes.
+
+Usage:
+  relay kill -issue <issue-id> [flags]
+
+Use this when an issue is stuck and you want Relay to stop the tracked worker pids and persist a failed state.
+
+Examples:
+  relay kill -issue issue-123
+`
+
+var watchUsage = `follow one issue's persisted state and logs.
+
+Usage:
+  relay watch -issue <issue-id> [flags]
+
+What it watches:
+  - issue.json state transitions
+  - progress.txt summaries
+  - new events.log lines
+  - latest run stderr/final output when a run fails
+
+Exit codes:
+  0  done
+  2  failed or interrupted
+  1  watch error
+
+Examples:
+  relay watch -issue issue-123
+  relay watch -issue issue-123 --poll-interval 1s
+`
+
+var versionUsage = `show build version information.
+
+Usage:
+  relay version
+
+Examples:
+  relay version
+`
+
+var pipelineTemplateYAML = `name: repo-name
+init_command: |
+  set -e
+  git clone --depth 1 https://github.com/owner/repo .
+
+  if [ -f pnpm-lock.yaml ]; then
+    pnpm install --frozen-lockfile
+  elif [ -f package-lock.json ]; then
+    npm ci
+  elif [ -f yarn.lock ]; then
+    yarn install --frozen-lockfile
+  elif [ -f go.mod ]; then
+    go mod download
+  fi
+
+  if [ -f package.json ]; then
+    npm run build --if-present
+  fi
+loop_num: 15
+plan_prompt: |
+  Read the repository before planning.
+  If the current branch is main or master, create and switch to a task branch before finishing planning.
+  Use a readable branch name derived from the task goal, for example relay/<short-slug>.
+  Break the goal into the smallest meaningful features that can be verified.
+  Each feature description must include an observable acceptance condition.
+  Prefer evidence from tests, commands, API behavior, UI behavior, or generated files.
+  Keep features stable across loops. Avoid vague or overlapping features.
+coding_prompt: |
+  Do not make task changes directly on main or master.
+  Stay on the task branch created during planning. If no task branch exists yet, create one before editing code.
+  Make the smallest correct change in WORKDIR_PATH.
+  Verify progress with real commands where possible.
+  Commit the current loop's work before finishing.
+  Push the task branch before finishing.
+  Ensure the branch has an open pull request. Create one if it does not exist yet; otherwise update the existing PR instead of opening duplicates.
+  Update FEATURE_LIST_PATH based on verified state, not intention.
+  Record evidence or blockers in notes.
+  Append a concise handoff entry to PROGRESS_PATH before finishing.
+`
+
+var issueTemplateJSON = `{
+  "pipeline_name": "repo-name",
+  "goal": "Describe the end state in one sentence.",
+  "description": "Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning."
+}
+`
+
+func pipelineTemplateHelpText() string {
+	return pipelineTemplateUsage + "\nTemplate:\n\n" + pipelineTemplateYAML
+}
+
+func issueTemplateHelpText() string {
+	return issueTemplateUsage + "\nTemplate:\n\n" + issueTemplateJSON
+}
 
 type installMethod string
 
@@ -152,6 +643,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "watch":
+		return runWatch(args[1:], stdout, stderr)
 	case "pipeline":
 		return runPipeline(args[1:], stdout, stderr)
 	case "issue":
@@ -167,8 +660,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		return runVersion(stdout)
 	case "help", "-h", "--help":
-		_, _ = io.WriteString(stdout, usage)
-		return 0
+		return runHelp(args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 1
@@ -180,12 +672,121 @@ func runVersion(stdout io.Writer) int {
 	return 0
 }
 
+func runHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, usage)
+		return 0
+	}
+
+	switch args[0] {
+	case "serve":
+		_, _ = io.WriteString(stdout, serveUsage)
+		return 0
+	case "watch":
+		_, _ = io.WriteString(stdout, watchUsage)
+		return 0
+	case "pipeline":
+		return runPipelineHelp(args[1:], stdout, stderr)
+	case "issue":
+		return runIssueHelp(args[1:], stdout, stderr)
+	case "status":
+		_, _ = io.WriteString(stdout, statusUsage)
+		return 0
+	case "report":
+		_, _ = io.WriteString(stdout, reportUsage)
+		return 0
+	case "kill":
+		_, _ = io.WriteString(stdout, killUsage)
+		return 0
+	case "upgrade":
+		_, _ = io.WriteString(stdout, upgradeUsage)
+		return 0
+	case "version":
+		_, _ = io.WriteString(stdout, versionUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown help topic %q\n\n%s", args[0], usage)
+		return 1
+	}
+}
+
+func runPipelineHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, pipelineUsage)
+		return 0
+	}
+	switch args[0] {
+	case "add":
+		_, _ = io.WriteString(stdout, pipelineAddUsage)
+		return 0
+	case "edit":
+		_, _ = io.WriteString(stdout, pipelineEditUsage)
+		return 0
+	case "import":
+		_, _ = io.WriteString(stdout, pipelineImportUsage)
+		return 0
+	case "show":
+		_, _ = io.WriteString(stdout, pipelineShowUsage)
+		return 0
+	case "template":
+		_, _ = io.WriteString(stdout, pipelineTemplateHelpText())
+		return 0
+	case "list":
+		_, _ = io.WriteString(stdout, pipelineListUsage)
+		return 0
+	case "delete":
+		_, _ = io.WriteString(stdout, pipelineDeleteUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown pipeline help topic %q\n\n%s", args[0], pipelineUsage)
+		return 1
+	}
+}
+
+func runIssueHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, issueUsage)
+		return 0
+	}
+	switch args[0] {
+	case "add":
+		_, _ = io.WriteString(stdout, issueAddUsage)
+		return 0
+	case "edit":
+		_, _ = io.WriteString(stdout, issueEditUsage)
+		return 0
+	case "interrupt":
+		_, _ = io.WriteString(stdout, issueInterruptUsage)
+		return 0
+	case "import":
+		_, _ = io.WriteString(stdout, issueImportUsage)
+		return 0
+	case "template":
+		_, _ = io.WriteString(stdout, issueTemplateHelpText())
+		return 0
+	case "list":
+		_, _ = io.WriteString(stdout, issueListUsage)
+		return 0
+	case "delete":
+		_, _ = io.WriteString(stdout, issueDeleteUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown issue help topic %q\n\n%s", args[0], issueUsage)
+		return 1
+	}
+}
+
+func isHelpArg(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help"
+}
+
 func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
 		_, _ = io.WriteString(stdout, upgradeUsage)
 	}
+	checkOnly := fs.Bool("check", false, "print version freshness information without upgrading")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -205,12 +806,30 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	gobin, gopath, _ := upgradeGoPaths()
 	method := detectInstallMethod(executable, gobin, gopath)
 	command, ok := upgradeCommandForMethod(method)
+	currentVersion := normalizeVersion(version)
+	if *checkOnly {
+		latestVersion, err := lookupLatestVersionForCheck(method)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "check latest relay version: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "current_version=%s\ninstall_method=%s\nlatest_version=%s\nrecommended_upgrade_command=%s\nskill_refresh_command=%s\n",
+			currentVersion,
+			method,
+			latestVersion,
+			recommendedUpgradeCommand(method, ok, command),
+			"npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y",
+		)
+		if latestVersion == currentVersion {
+			return 0
+		}
+		return 2
+	}
 	if !ok {
 		_, _ = io.WriteString(stdout, "self-upgrade is unavailable for local builds; reinstall via npm or go install instead.\n")
 		return 0
 	}
 
-	currentVersion := normalizeVersion(version)
 	latestVersion, err := upgradeLatestVersionLookup(method)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "check latest relay version: %v\n", err)
@@ -263,6 +882,26 @@ func upgradeCommandForMethod(method installMethod) (upgradeCommand, bool) {
 	default:
 		return upgradeCommand{}, false
 	}
+}
+
+func lookupLatestVersionForCheck(method installMethod) (string, error) {
+	if method == installMethodLocalBuild {
+		if latest, err := upgradeLatestVersionLookup(installMethodNPM); err == nil {
+			return latest, nil
+		}
+		return upgradeLatestVersionLookup(installMethodGoInstall)
+	}
+	return upgradeLatestVersionLookup(method)
+}
+
+func recommendedUpgradeCommand(method installMethod, ok bool, command upgradeCommand) string {
+	if ok {
+		return commandString(command.name, command.args)
+	}
+	if method == installMethodLocalBuild {
+		return "reinstall via npm or go install"
+	}
+	return "unavailable"
 }
 
 func commandString(name string, args []string) string {
@@ -326,11 +965,18 @@ func setUpgradeLatestVersionLookupForTesting(fn func(method installMethod) (stri
 func runServe(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, serveUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	workspaceRoot := fs.String("workspace-root", "", "directory for relay workspaces (default: ~/relay-workspaces or RELAY_WORKSPACE_ROOT)")
 	pollInterval := fs.Duration("poll-interval", 5*time.Second, "issue polling interval")
 	runOnce := fs.Bool("once", false, "process the current todo queue once and exit")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 
@@ -366,8 +1012,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 func runPipeline(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = io.WriteString(stderr, "pipeline requires a subcommand\n")
-		return 1
+		_, _ = io.WriteString(stdout, pipelineUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		return runPipelineHelp(args[1:], stdout, stderr)
 	}
 	switch args[0] {
 	case "add":
@@ -376,6 +1025,10 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		return runPipelineEdit(args[1:], stdout, stderr)
 	case "import":
 		return runPipelineImport(args[1:], stdout, stderr)
+	case "show":
+		return runPipelineShow(args[1:], stdout, stderr)
+	case "template":
+		return runPipelineTemplate(args[1:], stdout, stderr)
 	case "list":
 		return runPipelineList(args[1:], stdout, stderr)
 	case "delete":
@@ -389,12 +1042,19 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineAddUsage)
+		fs.PrintDefaults()
+	}
 	loopNum := fs.Int("loop-num", relay.DefaultLoopNum, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -438,12 +1098,19 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineEditUsage)
+		fs.PrintDefaults()
+	}
 	loopNum := fs.Int("loop-num", 0, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -493,9 +1160,16 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineImportUsage)
+		fs.PrintDefaults()
+	}
 	filePath := fs.String("file", "", "path to pipeline YAML")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *filePath == "" {
@@ -520,11 +1194,38 @@ func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runPipelineTemplate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("pipeline template", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineTemplateHelpText())
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "pipeline template does not take positional arguments\n")
+		return 1
+	}
+	_, _ = io.WriteString(stdout, pipelineTemplateYAML)
+	return 0
+}
+
 func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineDeleteUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -559,8 +1260,15 @@ func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 func runPipelineList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineListUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	store := relay.NewStore(resolveStateDir(*stateDir))
@@ -577,8 +1285,11 @@ func runPipelineList(args []string, stdout, stderr io.Writer) int {
 
 func runIssue(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = io.WriteString(stderr, "issue requires a subcommand\n")
-		return 1
+		_, _ = io.WriteString(stdout, issueUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		return runIssueHelp(args[1:], stdout, stderr)
 	}
 	switch args[0] {
 	case "add":
@@ -589,6 +1300,8 @@ func runIssue(args []string, stdout, stderr io.Writer) int {
 		return runIssueInterrupt(args[1:], stdout, stderr)
 	case "import":
 		return runIssueImport(args[1:], stdout, stderr)
+	case "template":
+		return runIssueTemplate(args[1:], stdout, stderr)
 	case "list":
 		return runIssueList(args[1:], stdout, stderr)
 	case "delete":
@@ -602,12 +1315,19 @@ func runIssue(args []string, stdout, stderr io.Writer) int {
 func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueAddUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "optional issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	issue := relay.Issue{
@@ -636,12 +1356,19 @@ func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueEditUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -682,9 +1409,16 @@ func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 func runIssueInterrupt(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue interrupt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueInterruptUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -724,9 +1458,16 @@ func runIssueInterrupt(args []string, stdout, stderr io.Writer) int {
 func runIssueImport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueImportUsage)
+		fs.PrintDefaults()
+	}
 	filePath := fs.String("file", "", "path to issue JSON")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *filePath == "" {
@@ -752,12 +1493,39 @@ func runIssueImport(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runIssueTemplate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("issue template", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueTemplateHelpText())
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "issue template does not take positional arguments\n")
+		return 1
+	}
+	_, _ = io.WriteString(stdout, issueTemplateJSON)
+	return 0
+}
+
 func runIssueDelete(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueDeleteUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -806,8 +1574,15 @@ func saveNewIssue(store *relay.Store, issue relay.Issue, stderr io.Writer) error
 func runIssueList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueListUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	store := relay.NewStore(resolveStateDir(*stateDir))
@@ -825,9 +1600,16 @@ func runIssueList(args []string, stdout, stderr io.Writer) int {
 func runStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, statusUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {
@@ -857,9 +1639,16 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 func runReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, reportUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {
@@ -892,9 +1681,16 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 func runKill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, killUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {

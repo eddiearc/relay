@@ -31,19 +31,48 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 That keeps the skill available across your agents and repositories. `relay-operator` is the self-contained default install. If you explicitly want a project-local install instead, remove `-g`.
 
+Treat `relay-operator` as the current best-practice path, not as a frozen or exclusive workflow. The goal is to let the community converge on a clearer default. If you find a better path than the current one, send a GitHub PR to improve the skill and its CLI guidance.
+
 Then prompt any agent that supports installed skills with something like:
 
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
-First verify that relay is installed.
+Start by running relay help and relay upgrade --check, and summarize whether Relay or the relay-operator skill should be refreshed.
 Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+Before that first agent prompt, run:
+
+```bash
+relay help
+relay upgrade --check
+```
+
+That gives one friendly opening check for:
+
+- current Relay version and install method
+- whether a newer Relay version is available
+- the canonical command map and workflow
+- the exact `relay-operator` skill refresh command
+
+Relay CLI help is the source of truth for concrete operations. Prefer:
+
+```bash
+relay help
+relay help pipeline
+relay help issue
+relay help serve
 ```
 
 The installed skill will guide the agent to:
 
+- run the opening `relay help` and `relay upgrade --check` check
+- use `relay help ...` as the operational source of truth
 - inspect the target repository
-- write a repository-specific Relay pipeline
+- inspect saved pipelines with `relay pipeline list` and `relay pipeline show`
+- select a clearly matching pipeline, ask the user to choose when multiple look plausible, or create a repository-specific pipeline from `relay pipeline template` when none fit
 - rewrite the task as a Relay issue with explicit acceptance criteria
+- ask several focused questions in one turn when the issue still lacks a clear end result, scope / non-goals, or verification path
 - run `relay serve --once` or explain how to run `relay serve` persistently
 - inspect Relay artifacts and host logs when something goes wrong
 
@@ -128,13 +157,7 @@ Installing `relay-operator` is enough for normal use. It covers:
 - persistent `relay serve` operation
 - artifact plus host-log inspection
 
-The repository also ships deeper internal reference files under:
-
-```text
-skills/relay-operator/references/
-```
-
-Those reference files are bundled inside `relay-operator`, so a single installed skill still includes the deeper pipeline, issue, and monitoring guidance.
+Released npm packages also include `skills/relay-operator/skill.json`. That metadata is versioned with the published Relay tag so the skill can track the bundled CLI release and recommend a consistent refresh command.
 
 For skill installation, prefer the `npx skills` distribution flow instead of manually copying files.
 
@@ -263,6 +286,8 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 
 ### Commands
 
+For examples and workflow guidance, prefer `relay help` and `relay help <command>`.
+
 - `relay pipeline add <name> --init-command ... --plan-prompt-file ... --coding-prompt-file ...`
 - `relay pipeline edit <name> [--init-command ...] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
 - `relay pipeline import -file pipeline.yaml`
@@ -279,6 +304,7 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 - `relay status -issue <issue-id>`
 - `relay report -issue <issue-id>`
 - `relay kill -issue <issue-id>`
+- `relay upgrade`
 - `relay version`
 
 ### Build and Release

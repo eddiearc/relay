@@ -1,5 +1,0 @@
-{
-  "pipeline_name": "repo-name",
-  "goal": "Describe the end state in one sentence.",
-  "description": "Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning."
-}

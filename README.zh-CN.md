@@ -31,20 +31,49 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 这样 skill 会对你的各个 agent / 仓库复用。`relay-operator` 是默认的自包含安装入口。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
 
+可以把 `relay-operator` 理解成当前版本下比较好的最佳实践路径，而不是一套冻结不变、唯一正确的流程。目标是让社区一起把默认路径打磨得更清晰。如果你摸索出比当前更好的使用路径，欢迎直接到 GitHub 提 PR，优化这个 skill 和对应的 CLI 指引。
+
 然后给任意支持已安装 skills 的 agent 这样一句指令：
 
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
-First verify that relay is installed.
+Start by running relay help and relay upgrade --check, and summarize whether Relay or the relay-operator skill should be refreshed.
 Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+第一次让 agent 接手之前，先运行：
+
+```bash
+relay help
+relay upgrade --check
+```
+
+这一步会把开场自检统一成一条命令，直接告诉你：
+
+- 当前 Relay 版本和安装方式
+- 是否有更新版本可升级
+- 规范的命令地图和工作流
+- `relay-operator` skill 刷新命令
+
+具体怎么操作 Relay，以 CLI help 为准，优先看：
+
+```bash
+relay help
+relay help pipeline
+relay help issue
+relay help serve
 ```
 
 这个 skill 会引导 agent 去：
 
+- 先执行 `relay help` 和 `relay upgrade --check` 开场检查
+- 用 `relay help ...` 作为具体操作的真相源
 - 检查 `relay` 是否已安装
 - 阅读目标仓库
-- 编写 repository-specific pipeline
+- 用 `relay pipeline list` 和 `relay pipeline show` 检查已有 pipeline
+- 如果某条 pipeline 明显匹配就直接选；如果有多个候选就让用户确认；如果没有合适的就从 `relay pipeline template` 开始创建 repository-specific pipeline
 - 把任务改写成带明确验收条件的 Relay issue
+- 如果目标结果、scope / 非目标、验证方式仍然不清楚，就一次性向用户提几个聚焦问题
 - 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
 - 出问题时检查 artifact 和宿主机日志
 
@@ -129,13 +158,7 @@ skills/relay-operator/
 - `relay serve` 常驻运行
 - 结合 artifact 和宿主机日志排障
 
-仓库里还提供了更细的内置参考文件，位置在：
-
-```text
-skills/relay-operator/references/
-```
-
-这些参考文件会随着 `relay-operator` 一起分发，所以只安装一个 skill 也能拿到更深的 pipeline / issue / monitor 指导。
+正式发布的 npm 包里还会带上 `skills/relay-operator/skill.json`。这个元数据会跟随发布 tag 写入版本号，用来让 skill 和打包出去的 Relay CLI 保持同一版本语义，并固定刷新命令。
 
 skill 的安装方式优先使用 `npx skills` 分发，而不是手动复制目录。
 
@@ -264,6 +287,8 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 
 ### 常用命令
 
+具体示例和流程说明优先看 `relay help` 和 `relay help <command>`。
+
 - `relay pipeline add <name> --init-command ... --plan-prompt-file ... --coding-prompt-file ...`
 - `relay pipeline edit <name> [--init-command ...] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
 - `relay pipeline import -file pipeline.yaml`
@@ -280,6 +305,7 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 - `relay status -issue <issue-id>`
 - `relay report -issue <issue-id>`
 - `relay kill -issue <issue-id>`
+- `relay upgrade`
 - `relay version`
 
 ### 构建与发版

@@ -25,13 +25,7 @@ skills/relay-operator/
 
 Use it as the canonical self-contained skill for agents that need to operate the Relay CLI against a repository.
 
-The package also includes deeper internal reference files under:
-
-```text
-skills/relay-operator/references/
-```
-
-Those reference files are bundled inside `skills/relay-operator/`, so the default install target remains self-contained.
+Released packages also rewrite `skills/relay-operator/skill.json` to the published Relay tag so the bundled skill can track the packaged CLI version and expose a stable refresh command.
 
 ## Local Packaging
 
