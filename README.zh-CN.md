@@ -31,6 +31,8 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 这样 skill 会对你的各个 agent / 仓库复用。`relay-operator` 是默认的自包含安装入口。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
 
+可以把 `relay-operator` 理解成当前版本下比较好的最佳实践路径，而不是一套冻结不变、唯一正确的流程。目标是让社区一起把默认路径打磨得更清晰。如果你摸索出比当前更好的使用路径，欢迎直接到 GitHub 提 PR，优化这个 skill 和对应的 CLI 指引。
+
 然后给任意支持已安装 skills 的 agent 这样一句指令：
 
 ```text

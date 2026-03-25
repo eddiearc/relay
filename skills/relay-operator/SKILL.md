@@ -7,6 +7,9 @@ description: Use when an agent needs to operate the Relay CLI end-to-end on a re
 
 This skill is only the agent adapter layer.
 
+Treat `relay-operator` as the current best-practice path, not as a frozen or exclusive workflow.
+If you find a path that is clearer, safer, or more effective than the current one, prefer improving Relay itself and sending a GitHub PR to refine this skill and the CLI guidance.
+
 Before doing Relay work:
 
 ```bash

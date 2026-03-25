@@ -31,6 +31,8 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 That keeps the skill available across your agents and repositories. `relay-operator` is the self-contained default install. If you explicitly want a project-local install instead, remove `-g`.
 
+Treat `relay-operator` as the current best-practice path, not as a frozen or exclusive workflow. The goal is to let the community converge on a clearer default. If you find a better path than the current one, send a GitHub PR to improve the skill and its CLI guidance.
+
 Then prompt any agent that supports installed skills with something like:
 
 ```text
