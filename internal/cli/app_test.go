@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +46,325 @@ func TestHelpIncludesVersionCommand(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("version")) {
 		t.Fatalf("expected help output to include version command, got %s", stdout.String())
+	}
+}
+
+func TestHelpIncludesUpgradeCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	exitCode := run([]string{"help"}, &stdout, io.Discard)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("upgrade")) {
+		t.Fatalf("expected help output to include upgrade command, got %s", stdout.String())
+	}
+}
+
+func TestUpgradeHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"upgrade", "--help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("upgrade the relay CLI")) {
+		t.Fatalf("expected upgrade help output, got %s", stdout.String())
+	}
+}
+
+func TestDetectInstallMethod(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		goBin      string
+		goPath     string
+		wantMethod installMethod
+	}{
+		{
+			name:       "npm install",
+			path:       "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay",
+			wantMethod: installMethodNPM,
+		},
+		{
+			name:       "go install with gobin",
+			path:       "/Users/test/bin/relay",
+			goBin:      "/Users/test/bin",
+			wantMethod: installMethodGoInstall,
+		},
+		{
+			name:       "go install with gopath",
+			path:       "/Users/test/go/bin/relay",
+			goPath:     "/Users/test/go",
+			wantMethod: installMethodGoInstall,
+		},
+		{
+			name:       "local build",
+			path:       "/tmp/relay/bin/relay",
+			wantMethod: installMethodLocalBuild,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detectInstallMethod(tc.path, tc.goBin, tc.goPath)
+			if got != tc.wantMethod {
+				t.Fatalf("expected %q, got %q", tc.wantMethod, got)
+			}
+		})
+	}
+}
+
+func TestUpgradeLocalBuildUnavailable(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/tmp/relay/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	called := false
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"upgrade"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	if called {
+		t.Fatalf("expected no upgrade command for local builds")
+	}
+	if !strings.Contains(stdout.String(), "self-upgrade is unavailable for local builds") {
+		t.Fatalf("expected local build message, got %s", stdout.String())
+	}
+}
+
+func TestUpgradeRunsNPMCommand(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	var gotName string
+	var gotArgs []string
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return []byte("updated"), nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		if method != installMethodNPM {
+			t.Fatalf("expected npm lookup, got %q", method)
+		}
+		return "v9.9.9", nil
+	})
+	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
+		return "v9.9.9", nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+		restoreLatestVersionLookup()
+		restoreVersionLookup()
+	})
+
+	var stdout bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if gotName != "npm" {
+		t.Fatalf("expected npm command, got %q", gotName)
+	}
+	if diff := strings.Join(gotArgs, " "); diff != "update -g @eddiearc/relay" {
+		t.Fatalf("expected npm update args, got %q", diff)
+	}
+}
+
+func TestUpgradeRunsGoInstallCommand(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/Users/test/go/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "/Users/test/go", nil
+	})
+	var gotName string
+	var gotArgs []string
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return []byte("installed"), nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		if method != installMethodGoInstall {
+			t.Fatalf("expected go-install lookup, got %q", method)
+		}
+		return "v9.9.9", nil
+	})
+	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
+		return "v9.9.9", nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+		restoreLatestVersionLookup()
+		restoreVersionLookup()
+	})
+
+	var stdout bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if gotName != "go" {
+		t.Fatalf("expected go command, got %q", gotName)
+	}
+	if diff := strings.Join(gotArgs, " "); diff != "install github.com/eddiearc/relay/cmd/relay@latest" {
+		t.Fatalf("expected go install args, got %q", diff)
+	}
+}
+
+func TestUpgradeReportsAlreadyUpToDate(t *testing.T) {
+	previousVersion := version
+	version = "v1.2.3"
+	t.Cleanup(func() {
+		version = previousVersion
+	})
+
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	called := false
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		called = true
+		return []byte("updated"), nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "v1.2.3", nil
+	})
+	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
+		return "v1.2.3", nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+		restoreLatestVersionLookup()
+		restoreVersionLookup()
+	})
+
+	var stdout bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if called {
+		t.Fatalf("expected no upgrade command when already up to date")
+	}
+	if diff := strings.TrimSpace(stdout.String()); diff != "Already up to date (v1.2.3)" {
+		t.Fatalf("expected exact up-to-date output, got %q", diff)
+	}
+}
+
+func TestUpgradeReportsTransition(t *testing.T) {
+	previousVersion := version
+	version = "v1.2.3"
+	t.Cleanup(func() {
+		version = previousVersion
+	})
+
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		return []byte("updated"), nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "v1.2.4", nil
+	})
+	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
+		return "v1.2.4", nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+		restoreLatestVersionLookup()
+		restoreVersionLookup()
+	})
+
+	var stdout bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if diff := strings.TrimSpace(stdout.String()); diff != "Upgraded: v1.2.3 → v1.2.4" {
+		t.Fatalf("expected exact upgrade output, got %q", diff)
+	}
+}
+
+func TestUpgradeReturnsLatestVersionLookupErrors(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "", errors.New("registry unavailable")
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreLatestVersionLookup()
+	})
+
+	var stderr bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, io.Discard, &stderr); exitCode == 0 {
+		t.Fatalf("expected failure")
+	}
+	if !strings.Contains(stderr.String(), "check latest relay version") {
+		t.Fatalf("expected latest-version lookup error, got %s", stderr.String())
+	}
+}
+
+func TestUpgradeReturnsCommandErrors(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		return []byte("permission denied"), errors.New("exit status 1")
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+	})
+
+	var stderr bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, io.Discard, &stderr); exitCode == 0 {
+		t.Fatalf("expected failure")
+	}
+	output := stderr.String()
+	for _, want := range []string{"upgrade failed", "npm update -g @eddiearc/relay", "permission denied"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected error output to contain %q, got %s", want, output)
+		}
 	}
 }
 

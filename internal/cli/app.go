@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,12 +29,99 @@ Commands:
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
+  upgrade  Upgrade the relay CLI
   version  Show build version information
   help     Show this help text
 `
 
+var upgradeUsage = `upgrade the relay CLI.
+
+Usage:
+  relay upgrade
+
+The command detects whether relay was installed via npm or go install and
+runs the matching self-update command. Local builds are not self-upgradable.
+`
+
+type installMethod string
+
+const (
+	installMethodLocalBuild installMethod = "local-build"
+	installMethodNPM        installMethod = "npm"
+	installMethodGoInstall  installMethod = "go-install"
+)
+
+type upgradeCommand struct {
+	name string
+	args []string
+}
+
 var newServeRunner = func() relay.AgentRunner {
 	return relay.CodexRunner{}
+}
+
+var upgradeExecutable = os.Executable
+
+var upgradeGoPaths = func() (string, string, error) {
+	gobin := strings.TrimSpace(os.Getenv("GOBIN"))
+	gopath := strings.TrimSpace(os.Getenv("GOPATH"))
+
+	if gobin == "" {
+		if out, err := exec.Command("go", "env", "GOBIN").Output(); err == nil {
+			gobin = strings.TrimSpace(string(out))
+		}
+	}
+	if gopath == "" {
+		if out, err := exec.Command("go", "env", "GOPATH").Output(); err == nil {
+			gopath = strings.TrimSpace(string(out))
+		}
+	}
+
+	return gobin, gopath, nil
+}
+
+var upgradeCommandRunner = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
+var upgradeVersionLookup = func(executable string) (string, error) {
+	out, err := exec.Command(executable, "version").CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", errors.New("empty version output")
+	}
+	firstLine := strings.Split(line, "\n")[0]
+	return normalizeVersion(strings.TrimSpace(strings.TrimPrefix(firstLine, "relay "))), nil
+}
+
+var upgradeLatestVersionLookup = func(method installMethod) (string, error) {
+	var out []byte
+	var err error
+
+	switch method {
+	case installMethodNPM:
+		out, err = exec.Command("npm", "view", "@eddiearc/relay", "version").CombinedOutput()
+	case installMethodGoInstall:
+		out, err = exec.Command("go", "list", "-m", "-f", "{{.Version}}", "github.com/eddiearc/relay@latest").CombinedOutput()
+	default:
+		return "", fmt.Errorf("unsupported install method %q", method)
+	}
+	if err != nil {
+		message := strings.TrimSpace(string(out))
+		if message == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s", err, message)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", errors.New("empty latest version output")
+	}
+	firstLine := strings.Split(line, "\n")[0]
+	return normalizeVersion(strings.TrimSpace(firstLine)), nil
 }
 
 // Run executes the relay CLI and returns a process exit code.
@@ -73,6 +162,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReport(args[1:], stdout, stderr)
 	case "kill":
 		return runKill(args[1:], stdout, stderr)
+	case "upgrade":
+		return runUpgrade(args[1:], stdout, stderr)
 	case "version":
 		return runVersion(stdout)
 	case "help", "-h", "--help":
@@ -87,6 +178,149 @@ func run(args []string, stdout, stderr io.Writer) int {
 func runVersion(stdout io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "relay %s\ncommit: %s\nbuilt: %s\n", version, commit, buildDate)
 	return 0
+}
+
+func runUpgrade(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, upgradeUsage)
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "upgrade does not take positional arguments\n")
+		return 1
+	}
+
+	executable, err := upgradeExecutable()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "locate relay executable: %v\n", err)
+		return 1
+	}
+	gobin, gopath, _ := upgradeGoPaths()
+	method := detectInstallMethod(executable, gobin, gopath)
+	command, ok := upgradeCommandForMethod(method)
+	if !ok {
+		_, _ = io.WriteString(stdout, "self-upgrade is unavailable for local builds; reinstall via npm or go install instead.\n")
+		return 0
+	}
+
+	currentVersion := normalizeVersion(version)
+	latestVersion, err := upgradeLatestVersionLookup(method)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "check latest relay version: %v\n", err)
+		return 1
+	}
+	if latestVersion == currentVersion {
+		_, _ = fmt.Fprintf(stdout, "Already up to date (%s)\n", currentVersion)
+		return 0
+	}
+
+	out, err := upgradeCommandRunner(command.name, command.args...)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "upgrade failed while running %q: %v\n", commandString(command.name, command.args), err)
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			_, _ = fmt.Fprintln(stderr, msg)
+		}
+		_, _ = io.WriteString(stderr, "Try running the command manually to inspect permissions or network access.\n")
+		return 1
+	}
+
+	newVersion, err := upgradeVersionLookup(executable)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "upgrade completed but version check failed: %v\n", err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(stdout, "Upgraded: %s → %s\n", currentVersion, newVersion)
+	return 0
+}
+
+func detectInstallMethod(executable, gobin, gopath string) installMethod {
+	path := filepath.ToSlash(filepath.Clean(executable))
+	if strings.Contains(path, "/node_modules/@eddiearc/relay-") || strings.Contains(path, "/node_modules/@eddiearc/relay/") {
+		return installMethodNPM
+	}
+	if gobin != "" && filepath.Clean(executable) == filepath.Join(filepath.Clean(gobin), "relay") {
+		return installMethodGoInstall
+	}
+	if gopath != "" && filepath.Clean(executable) == filepath.Join(filepath.Clean(gopath), "bin", "relay") {
+		return installMethodGoInstall
+	}
+	return installMethodLocalBuild
+}
+
+func upgradeCommandForMethod(method installMethod) (upgradeCommand, bool) {
+	switch method {
+	case installMethodNPM:
+		return upgradeCommand{name: "npm", args: []string{"update", "-g", "@eddiearc/relay"}}, true
+	case installMethodGoInstall:
+		return upgradeCommand{name: "go", args: []string{"install", "github.com/eddiearc/relay/cmd/relay@latest"}}, true
+	default:
+		return upgradeCommand{}, false
+	}
+}
+
+func commandString(name string, args []string) string {
+	return strings.TrimSpace(strings.Join(append([]string{name}, args...), " "))
+}
+
+func normalizeVersion(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "v") {
+		return trimmed
+	}
+	if trimmed[0] >= '0' && trimmed[0] <= '9' {
+		return "v" + trimmed
+	}
+	return trimmed
+}
+
+func setUpgradeExecutableForTesting(fn func() (string, error)) func() {
+	previous := upgradeExecutable
+	upgradeExecutable = fn
+	return func() {
+		upgradeExecutable = previous
+	}
+}
+
+func setUpgradeGoPathsForTesting(fn func() (string, string, error)) func() {
+	previous := upgradeGoPaths
+	upgradeGoPaths = fn
+	return func() {
+		upgradeGoPaths = previous
+	}
+}
+
+func setUpgradeCommandRunnerForTesting(fn func(name string, args ...string) ([]byte, error)) func() {
+	previous := upgradeCommandRunner
+	upgradeCommandRunner = fn
+	return func() {
+		upgradeCommandRunner = previous
+	}
+}
+
+func setUpgradeVersionLookupForTesting(fn func(executable string) (string, error)) func() {
+	previous := upgradeVersionLookup
+	upgradeVersionLookup = fn
+	return func() {
+		upgradeVersionLookup = previous
+	}
+}
+
+func setUpgradeLatestVersionLookupForTesting(fn func(method installMethod) (string, error)) func() {
+	previous := upgradeLatestVersionLookup
+	upgradeLatestVersionLookup = fn
+	return func() {
+		upgradeLatestVersionLookup = previous
+	}
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {
