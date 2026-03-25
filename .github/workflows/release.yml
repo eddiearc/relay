@@ -61,7 +61,6 @@ jobs:
       - name: Publish npm packages
         env:
           VERSION: ${{ github.event.release.tag_name }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm --prefix npm run publish-release -- \
             --version "$VERSION" \

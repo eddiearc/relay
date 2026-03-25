@@ -55,23 +55,35 @@ The GitHub release workflow already builds `dist/*.tar.gz`. After that it:
 Preferred:
 
 1. Create the scoped packages under the npm account or organization that owns `@eddiearc`.
-2. For each package, configure npm Trusted Publisher to trust this GitHub repository and the release workflow file.
+2. For each package, configure npm Trusted Publisher to trust:
+   - GitHub user or org: `eddiearc`
+   - Repository: `relay`
+   - Workflow filename: `release.yml`
 3. Keep the workflow permission `id-token: write` enabled.
+4. Publish from GitHub-hosted runners only.
 
-Bootstrap or fallback:
+Packages that need Trusted Publisher configured:
 
-1. Create an npm automation token that can publish the `@eddiearc` scope.
+- `@eddiearc/relay`
+- `@eddiearc/relay-darwin-arm64`
+- `@eddiearc/relay-darwin-x64`
+- `@eddiearc/relay-linux-arm64`
+- `@eddiearc/relay-linux-x64`
+
+Fallback:
+
+1. Create a granular access token with write access and bypass 2FA enabled.
 2. Add it to the GitHub repository secrets as `NPM_TOKEN`.
-3. Re-run the release workflow.
+3. Re-add `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the publish step if you intentionally want token-based publishing again.
 
-The workflow supports both modes. Trusted publishing is preferred for steady-state releases; `NPM_TOKEN` is the fallback when bootstrapping or recovering package ownership.
+Trusted publishing is now the primary path in CI. Token-based publishing is only a fallback if you explicitly wire it back in.
 
 ## First Publish Checklist
 
 1. Ensure the npm scope `@eddiearc` exists and your publisher account has access.
-2. Publish one release tag such as `v0.1.0`.
-3. Confirm all five packages exist on npm.
-4. Configure Trusted Publisher on each package if the first publish used `NPM_TOKEN`.
+2. Configure Trusted Publisher for all five packages using workflow filename `release.yml`.
+3. Publish one release tag such as `v0.1.0`.
+4. Confirm all five packages exist on npm.
 
 ## Important Runtime Notes
 

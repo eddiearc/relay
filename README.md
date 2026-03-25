@@ -277,6 +277,8 @@ gh release create v0.1.0 --generate-notes
 
 For the npm package layout and registry setup, see [`npm/README.md`](./npm/README.md).
 
+The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The release workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release.yml`.
+
 Windows packages are not published yet because the current runtime assumes Unix tools such as `zsh` and `SIGKILL`.
 
 ### Scope
