@@ -37,7 +37,7 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
-Start by running relay help and relay version, and summarize whether Relay or the relay-operator skill should be refreshed.
+Start by running relay help and relay upgrade --check, and summarize whether Relay or the relay-operator skill should be refreshed.
 Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
 ```
 
@@ -45,12 +45,13 @@ Then inspect the repository, write a repository-specific pipeline, rewrite the t
 
 ```bash
 relay help
-relay version
+relay upgrade --check
 ```
 
 这一步会把开场自检统一成一条命令，直接告诉你：
 
-- 当前 Relay 版本
+- 当前 Relay 版本和安装方式
+- 是否有更新版本可升级
 - 规范的命令地图和工作流
 - `relay-operator` skill 刷新命令
 
@@ -65,7 +66,7 @@ relay help serve
 
 这个 skill 会引导 agent 去：
 
-- 先执行 `relay help` 和 `relay version` 开场检查
+- 先执行 `relay help` 和 `relay upgrade --check` 开场检查
 - 用 `relay help ...` 作为具体操作的真相源
 - 检查 `relay` 是否已安装
 - 阅读目标仓库

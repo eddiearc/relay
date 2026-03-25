@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,11 +23,18 @@ const (
 )
 
 type Pipeline struct {
-	Name         string `json:"name" yaml:"name"`
-	InitCommand  string `json:"init_command" yaml:"init_command"`
-	LoopNum      int    `json:"loop_num" yaml:"loop_num"`
-	PlanPrompt   string `json:"plan_prompt" yaml:"plan_prompt"`
-	CodingPrompt string `json:"coding_prompt" yaml:"coding_prompt"`
+	Name         string           `json:"name" yaml:"name"`
+	Project      *PipelineProject `json:"project,omitempty" yaml:"project,omitempty"`
+	InitCommand  string           `json:"init_command" yaml:"init_command"`
+	LoopNum      int              `json:"loop_num" yaml:"loop_num"`
+	PlanPrompt   string           `json:"plan_prompt" yaml:"plan_prompt"`
+	CodingPrompt string           `json:"coding_prompt" yaml:"coding_prompt"`
+}
+
+type PipelineProject struct {
+	Key       string `json:"key,omitempty" yaml:"key,omitempty"`
+	Path      string `json:"path,omitempty" yaml:"path,omitempty"`
+	RemoteURL string `json:"remote_url,omitempty" yaml:"remote_url,omitempty"`
 }
 
 type Issue struct {
@@ -58,6 +66,14 @@ func (p *Pipeline) Normalize() error {
 	if p.LoopNum <= 0 {
 		p.LoopNum = DefaultLoopNum
 	}
+	if p.Project != nil {
+		p.Project.Key = strings.TrimSpace(p.Project.Key)
+		p.Project.Path = normalizeProjectPath(p.Project.Path)
+		p.Project.RemoteURL = strings.TrimSpace(p.Project.RemoteURL)
+		if p.Project.Key == "" && p.Project.Path == "." && p.Project.RemoteURL == "" {
+			p.Project = nil
+		}
+	}
 	return p.Validate()
 }
 
@@ -79,6 +95,17 @@ func (p Pipeline) Validate() error {
 	}
 	if p.LoopNum <= 0 {
 		return fmt.Errorf("pipeline.loop_num must be positive, got %d", p.LoopNum)
+	}
+	if p.Project != nil {
+		if p.Project.Key == "" {
+			return errors.New("pipeline.project.key is required when project metadata is set")
+		}
+		if p.Project.Path == "" {
+			return errors.New("pipeline.project.path must not be empty")
+		}
+		if strings.HasPrefix(p.Project.Path, "/") || strings.Contains(p.Project.Path, `\`) {
+			return fmt.Errorf("pipeline.project.path %q must be a repo-relative slash path", p.Project.Path)
+		}
 	}
 	return nil
 }
@@ -163,4 +190,16 @@ func IsIssueTerminalStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeProjectPath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "." {
+		return "."
+	}
+	normalized := filepath.ToSlash(strings.TrimPrefix(filepath.Clean(trimmed), "./"))
+	if normalized == "." || normalized == "" {
+		return "."
+	}
+	return normalized
 }

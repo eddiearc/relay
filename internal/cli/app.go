@@ -26,23 +26,30 @@ Usage:
 Workflow:
   1. relay help
   2. relay version
-  3. relay help pipeline
-  4. relay help issue
-  5. relay serve --once
+  3. relay upgrade --check
+  4. relay help pipeline
+  5. relay help issue
+  6. relay serve --once
 
 Examples:
   relay help
   relay version
+  relay upgrade --check
+  relay pipeline match --repo /path/to/repo
   relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
+  relay issue evaluate --pipeline demo --goal "Implement X" --description "Scope, constraints, non-goals, and verification."
   relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
   relay serve --once
+  relay watch -issue issue-123
   relay status -issue issue-123
   relay report -issue issue-123
 
 Commands:
   serve    Start the polling orchestrator
-  pipeline Create, inspect, and print pipeline templates
-  issue    Create, inspect, and print issue templates
+  watch    Follow one issue's persisted state and logs
+  pipeline Create, inspect, match, and print pipeline templates
+  issue    Create, inspect, evaluate, and print issue templates
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
@@ -52,9 +59,13 @@ Commands:
 
 More help:
   relay help serve
+  relay help watch
   relay help pipeline add
+  relay help pipeline match
+  relay help pipeline show
   relay help pipeline template
   relay help issue add
+  relay help issue evaluate
   relay help issue template
 
 Skill refresh:
@@ -65,15 +76,29 @@ var upgradeUsage = `upgrade the relay CLI.
 
 Usage:
   relay upgrade
+  relay upgrade --check
 
 The command detects whether relay was installed via npm or go install and
 runs the matching self-update command. Local builds are not self-upgradable.
+
+With --check, Relay only reports:
+  - current version
+  - install method
+  - latest version
+  - recommended upgrade command
+  - skill refresh command
+
+Exit codes for --check:
+  0  already up to date
+  2  update available
+  1  check failed
 
 If you use the bundled relay-operator skill, refresh it separately with:
   npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 
 Examples:
   relay upgrade
+  relay upgrade --check
 `
 
 var serveUsage = `start the polling orchestrator.
@@ -101,6 +126,7 @@ Mode selection:
 Diagnostic workflow:
   - relay issue list
   - relay status -issue <issue-id>
+  - relay watch -issue <issue-id>
   - relay report -issue <issue-id>
   - inspect feature_list.json, progress.txt, events.log, and runs/ under the issue artifact directory
   - confirm host process state with ps, launchctl, systemctl, or journalctl as appropriate
@@ -121,6 +147,8 @@ Subcommands:
   add      Create a pipeline from flags and prompt files
   edit     Update a saved pipeline
   import   Import a pipeline from YAML
+  match    Match a local repo path to a saved pipeline
+  show     Print a saved pipeline with a readable summary
   template Print a full pipeline YAML template
   list     List saved pipelines
   delete   Delete a saved pipeline
@@ -139,7 +167,9 @@ Before writing a pipeline, inspect:
 
 Examples:
   relay pipeline template
+  relay pipeline match --repo /path/to/repo
   relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
   relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --plan-prompt-file plan.md --coding-prompt-file coding.md
   relay pipeline edit demo --loop-num 15
 `
@@ -175,6 +205,9 @@ Usage:
   relay pipeline edit <name> [flags]
 
 What can be changed:
+  --project-key
+  --project-path
+  --project-remote-url
   --init-command
   --loop-num
   --plan-prompt-file
@@ -197,12 +230,50 @@ Required pipeline YAML fields:
   - coding_prompt
 
 Optional pipeline YAML fields:
+  - project.key
+  - project.path
+  - project.remote_url
   - loop_num
 
 Use "relay pipeline template" to print a complete starting template.
 
 Examples:
   relay pipeline import -file pipeline.yaml
+`
+
+var pipelineMatchUsage = `match a local repo path to a saved pipeline.
+
+Usage:
+  relay pipeline match --repo <path> [flags]
+
+Matching order:
+  1. exact project.key + project.path
+  2. same project.key with project.path == "."
+
+Notes:
+  - only pipelines with project metadata participate in automatic matching
+  - legacy pipelines without project metadata are ignored by match
+  - when multiple candidates match, Relay prints the candidates and exits with code 2
+
+Examples:
+  relay pipeline match --repo .
+  relay pipeline match --repo ./apps/web
+`
+
+var pipelineShowUsage = `print a saved pipeline with a readable summary.
+
+Usage:
+  relay pipeline show <name> [flags]
+
+What it prints:
+  - project metadata summary
+  - init strategy summary
+  - loop limit
+  - key plan and coding constraints
+  - full saved YAML
+
+Examples:
+  relay pipeline show demo
 `
 
 var pipelineTemplateUsage = `print a complete pipeline YAML template.
@@ -212,6 +283,7 @@ Usage:
 
 What it prints:
   - a full pipeline.yaml skeleton
+  - project metadata fields for formal repo matching
   - branch and PR guidance in the embedded prompts
   - default loop_num guidance suitable for real repository work
 
@@ -248,6 +320,7 @@ Usage:
 Subcommands:
   add        Create an issue from flags
   edit       Update a saved issue
+  evaluate   Evaluate issue quality before creation
   interrupt  Request interruption for a running issue
   import     Import an issue from JSON
   template   Print a full issue JSON template
@@ -268,6 +341,7 @@ Issue writing rules:
 
 Examples:
   relay issue template
+  relay issue evaluate --pipeline demo --goal "Implement X" --description "Scope, constraints, non-goals, and verification."
   relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
   relay issue list
   relay issue interrupt --id issue-123
@@ -298,6 +372,28 @@ Examples:
     --pipeline demo \
     --goal "Add CLI summary output" \
     --description "Update the command output and verify with go test ./..."
+`
+
+var issueEvaluateUsage = `evaluate an issue draft before creation.
+
+Usage:
+  relay issue evaluate --pipeline <name> --goal <goal> --description <description> [flags]
+  relay issue evaluate -file <issue.json> [flags]
+
+Evaluation dimensions:
+  - goal clarity
+  - verification specificity
+  - scope, constraints, and non-goals clarity
+  - execution readiness
+
+Exit codes:
+  0  ready to create
+  2  not ready; revise the issue first
+  1  command or input error
+
+Examples:
+  relay issue evaluate --pipeline demo --goal "Add CLI summary output" --description "Only touch the CLI summary output. Non-goal: worker runtime changes. Verify with go test ./... and relay help output."
+  relay issue evaluate -file issue.json
 `
 
 var issueEditUsage = `update a saved issue.
@@ -410,6 +506,27 @@ Examples:
   relay kill -issue issue-123
 `
 
+var watchUsage = `follow one issue's persisted state and logs.
+
+Usage:
+  relay watch -issue <issue-id> [flags]
+
+What it watches:
+  - issue.json state transitions
+  - progress.txt summaries
+  - new events.log lines
+  - latest run stderr/final output when a run fails
+
+Exit codes:
+  0  done
+  2  failed or interrupted
+  1  watch error
+
+Examples:
+  relay watch -issue issue-123
+  relay watch -issue issue-123 --poll-interval 1s
+`
+
 var versionUsage = `show build version information.
 
 Usage:
@@ -420,6 +537,10 @@ Examples:
 `
 
 var pipelineTemplateYAML = `name: repo-name
+project:
+  key: github.com/owner/repo
+  path: .
+  remote_url: https://github.com/owner/repo.git
 init_command: |
   set -e
   git clone --depth 1 https://github.com/owner/repo .
@@ -583,6 +704,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "watch":
+		return runWatch(args[1:], stdout, stderr)
 	case "pipeline":
 		return runPipeline(args[1:], stdout, stderr)
 	case "issue":
@@ -619,6 +742,9 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "serve":
 		_, _ = io.WriteString(stdout, serveUsage)
+		return 0
+	case "watch":
+		_, _ = io.WriteString(stdout, watchUsage)
 		return 0
 	case "pipeline":
 		return runPipelineHelp(args[1:], stdout, stderr)
@@ -660,6 +786,12 @@ func runPipelineHelp(args []string, stdout, stderr io.Writer) int {
 	case "import":
 		_, _ = io.WriteString(stdout, pipelineImportUsage)
 		return 0
+	case "match":
+		_, _ = io.WriteString(stdout, pipelineMatchUsage)
+		return 0
+	case "show":
+		_, _ = io.WriteString(stdout, pipelineShowUsage)
+		return 0
 	case "template":
 		_, _ = io.WriteString(stdout, pipelineTemplateHelpText())
 		return 0
@@ -686,6 +818,9 @@ func runIssueHelp(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "edit":
 		_, _ = io.WriteString(stdout, issueEditUsage)
+		return 0
+	case "evaluate":
+		_, _ = io.WriteString(stdout, issueEvaluateUsage)
 		return 0
 	case "interrupt":
 		_, _ = io.WriteString(stdout, issueInterruptUsage)
@@ -718,6 +853,7 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		_, _ = io.WriteString(stdout, upgradeUsage)
 	}
+	checkOnly := fs.Bool("check", false, "print version freshness information without upgrading")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -737,12 +873,30 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	gobin, gopath, _ := upgradeGoPaths()
 	method := detectInstallMethod(executable, gobin, gopath)
 	command, ok := upgradeCommandForMethod(method)
+	currentVersion := normalizeVersion(version)
+	if *checkOnly {
+		latestVersion, err := lookupLatestVersionForCheck(method)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "check latest relay version: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "current_version=%s\ninstall_method=%s\nlatest_version=%s\nrecommended_upgrade_command=%s\nskill_refresh_command=%s\n",
+			currentVersion,
+			method,
+			latestVersion,
+			recommendedUpgradeCommand(method, ok, command),
+			"npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y",
+		)
+		if latestVersion == currentVersion {
+			return 0
+		}
+		return 2
+	}
 	if !ok {
 		_, _ = io.WriteString(stdout, "self-upgrade is unavailable for local builds; reinstall via npm or go install instead.\n")
 		return 0
 	}
 
-	currentVersion := normalizeVersion(version)
 	latestVersion, err := upgradeLatestVersionLookup(method)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "check latest relay version: %v\n", err)
@@ -795,6 +949,26 @@ func upgradeCommandForMethod(method installMethod) (upgradeCommand, bool) {
 	default:
 		return upgradeCommand{}, false
 	}
+}
+
+func lookupLatestVersionForCheck(method installMethod) (string, error) {
+	if method == installMethodLocalBuild {
+		if latest, err := upgradeLatestVersionLookup(installMethodNPM); err == nil {
+			return latest, nil
+		}
+		return upgradeLatestVersionLookup(installMethodGoInstall)
+	}
+	return upgradeLatestVersionLookup(method)
+}
+
+func recommendedUpgradeCommand(method installMethod, ok bool, command upgradeCommand) string {
+	if ok {
+		return commandString(command.name, command.args)
+	}
+	if method == installMethodLocalBuild {
+		return "reinstall via npm or go install"
+	}
+	return "unavailable"
 }
 
 func commandString(name string, args []string) string {
@@ -918,6 +1092,10 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		return runPipelineEdit(args[1:], stdout, stderr)
 	case "import":
 		return runPipelineImport(args[1:], stdout, stderr)
+	case "match":
+		return runPipelineMatch(args[1:], stdout, stderr)
+	case "show":
+		return runPipelineShow(args[1:], stdout, stderr)
 	case "template":
 		return runPipelineTemplate(args[1:], stdout, stderr)
 	case "list":
@@ -938,6 +1116,9 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 	loopNum := fs.Int("loop-num", relay.DefaultLoopNum, "maximum coding loop iterations")
+	projectKey := fs.String("project-key", "", "normalized project key such as github.com/owner/repo")
+	projectPath := fs.String("project-path", "", "repo-relative path for monorepos (default: . when project metadata is set)")
+	projectRemoteURL := fs.String("project-remote-url", "", "original git remote URL for explanation and display")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
@@ -964,6 +1145,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	}
 	pipeline := relay.Pipeline{
 		Name:         fs.Arg(0),
+		Project:      buildPipelineProject(*projectKey, *projectPath, *projectRemoteURL),
 		InitCommand:  *initCommand,
 		LoopNum:      *loopNum,
 		PlanPrompt:   string(planPrompt),
@@ -994,6 +1176,9 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 	loopNum := fs.Int("loop-num", 0, "maximum coding loop iterations")
+	projectKey := fs.String("project-key", "", "normalized project key such as github.com/owner/repo")
+	projectPath := fs.String("project-path", "", "repo-relative path for monorepos (default: . when project metadata is set)")
+	projectRemoteURL := fs.String("project-remote-url", "", "original git remote URL for explanation and display")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
@@ -1016,6 +1201,9 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	}
 	if *initCommand != "" {
 		pipeline.InitCommand = *initCommand
+	}
+	if *projectKey != "" || *projectPath != "" || *projectRemoteURL != "" {
+		pipeline.Project = buildPipelineProject(*projectKey, *projectPath, *projectRemoteURL)
 	}
 	if *loopNum > 0 {
 		pipeline.LoopNum = *loopNum
@@ -1187,6 +1375,8 @@ func runIssue(args []string, stdout, stderr io.Writer) int {
 		return runIssueAdd(args[1:], stdout, stderr)
 	case "edit":
 		return runIssueEdit(args[1:], stdout, stderr)
+	case "evaluate":
+		return runIssueEvaluate(args[1:], stdout, stderr)
 	case "interrupt":
 		return runIssueInterrupt(args[1:], stdout, stderr)
 	case "import":
@@ -1619,6 +1809,17 @@ func writeIssue(w io.Writer, issue relay.Issue) error {
 	}
 	_, err = fmt.Fprintln(w, string(data))
 	return err
+}
+
+func buildPipelineProject(key, path, remoteURL string) *relay.PipelineProject {
+	if key == "" && path == "" && remoteURL == "" {
+		return nil
+	}
+	return &relay.PipelineProject{
+		Key:       key,
+		Path:      path,
+		RemoteURL: remoteURL,
+	}
 }
 
 func resolveStateDir(path string) string {
