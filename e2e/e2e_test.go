@@ -21,8 +21,8 @@ func TestCLIWorkflowWithTempDirsAndFakeRunner(t *testing.T) {
 	stateDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
 
-	restore := cli.SetServeRunnerForTesting(func() relay.AgentRunner {
-		return &fakeEndToEndRunner{t: t}
+	restore := cli.SetServeRunnerForTesting(func(string) (relay.AgentRunner, error) {
+		return &fakeEndToEndRunner{t: t}, nil
 	})
 	t.Cleanup(restore)
 
@@ -47,8 +47,8 @@ func TestWatchReportsCompletedIssueAfterEndToEndServe(t *testing.T) {
 	stateDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
 
-	restore := cli.SetServeRunnerForTesting(func() relay.AgentRunner {
-		return &fakeEndToEndRunner{t: t}
+	restore := cli.SetServeRunnerForTesting(func(string) (relay.AgentRunner, error) {
+		return &fakeEndToEndRunner{t: t}, nil
 	})
 	t.Cleanup(restore)
 
@@ -84,8 +84,8 @@ func TestWatchReportsFailedIssueAfterEndToEndServe(t *testing.T) {
 	stateDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
 
-	restore := cli.SetServeRunnerForTesting(func() relay.AgentRunner {
-		return &failingEndToEndRunner{t: t}
+	restore := cli.SetServeRunnerForTesting(func(string) (relay.AgentRunner, error) {
+		return &failingEndToEndRunner{t: t}, nil
 	})
 	t.Cleanup(restore)
 
@@ -116,34 +116,72 @@ func TestWatchReportsFailedIssueAfterEndToEndServe(t *testing.T) {
 	}
 }
 
+func TestServeUsesIssueAgentRunnerOverrideEndToEnd(t *testing.T) {
+	requireGit(t)
+
+	stateDir := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
+
+	var runnerNames []string
+	restore := cli.SetServeRunnerForTesting(func(name string) (relay.AgentRunner, error) {
+		runnerNames = append(runnerNames, name)
+		return &fakeEndToEndRunner{t: t}, nil
+	})
+	t.Cleanup(restore)
+
+	runTodoWorkflowWithRunners(t, stateDir, workspaceRoot, relay.AgentRunnerCodex, relay.AgentRunnerClaude)
+
+	if len(runnerNames) == 0 {
+		t.Fatal("expected serve to request a runner")
+	}
+	if runnerNames[0] != relay.AgentRunnerClaude {
+		t.Fatalf("expected issue override to select claude, got %v", runnerNames)
+	}
+}
+
 func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
+	t.Helper()
+	runTodoWorkflowWithRunners(t, stateDir, workspaceRoot, "", "")
+}
+
+func runTodoWorkflowWithRunners(t *testing.T, stateDir, workspaceRoot, pipelineRunner, issueRunner string) {
 	t.Helper()
 
 	planPrompt := writeTempFile(t, "plan.md", realPlanPrompt)
 	codingPrompt := writeTempFile(t, "coding.md", realCodingPrompt)
 
-	var stderr bytes.Buffer
-	if exitCode := cli.RunWithIO([]string{
+	pipelineArgs := []string{
 		"pipeline", "add",
 		"--init-command", todoInitCommand(),
 		"--loop-num", "1",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
 		"-state-dir", stateDir,
-		"todo-e2e",
-	}, io.Discard, &stderr); exitCode != 0 {
+	}
+	if pipelineRunner != "" {
+		pipelineArgs = append(pipelineArgs, "--agent-runner", pipelineRunner)
+	}
+	pipelineArgs = append(pipelineArgs, "todo-e2e")
+
+	var stderr bytes.Buffer
+	if exitCode := cli.RunWithIO(pipelineArgs, io.Discard, &stderr); exitCode != 0 {
 		t.Fatalf("pipeline add failed: %s", stderr.String())
 	}
 
-	stderr.Reset()
-	if exitCode := cli.RunWithIO([]string{
+	issueArgs := []string{
 		"issue", "add",
 		"--id", "issue-todo-e2e",
 		"--pipeline", "todo-e2e",
 		"--goal", "Support persistent todo add/list commands",
 		"--description", "Upgrade the sample Go CLI todo app to persist todos and list them.",
 		"-state-dir", stateDir,
-	}, io.Discard, &stderr); exitCode != 0 {
+	}
+	if issueRunner != "" {
+		issueArgs = append(issueArgs, "--agent-runner", issueRunner)
+	}
+
+	stderr.Reset()
+	if exitCode := cli.RunWithIO(issueArgs, io.Discard, &stderr); exitCode != 0 {
 		t.Fatalf("issue add failed: %s", stderr.String())
 	}
 

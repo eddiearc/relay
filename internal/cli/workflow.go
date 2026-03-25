@@ -50,11 +50,20 @@ func runPipelineShow(args []string, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "summary:\n")
 	_, _ = fmt.Fprintf(stdout, "- name: %s\n", pipeline.Name)
 	_, _ = fmt.Fprintf(stdout, "- init_strategy: %s\n", summarizeBlock(pipeline.InitCommand))
+	_, _ = fmt.Fprintf(stdout, "- agent_runner: %s\n", summarizeAgentRunner(pipeline.AgentRunner))
 	_, _ = fmt.Fprintf(stdout, "- loop_limit: %d\n", pipeline.LoopNum)
 	_, _ = fmt.Fprintf(stdout, "- plan_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.PlanPrompt, 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "- coding_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.CodingPrompt, 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "\nyaml:\n%s", string(data))
 	return 0
+}
+
+func summarizeAgentRunner(value string) string {
+	resolved, err := relay.ResolveAgentRunner("", value)
+	if err != nil {
+		return value
+	}
+	return resolved
 }
 
 func summarizeBlock(value string) string {

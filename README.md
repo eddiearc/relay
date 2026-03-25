@@ -167,7 +167,8 @@ Relay acts as an execution layer for coding agents:
 - `progress.txt` is the handoff log between runs.
 - `events.log`, `runs/`, and `issue.json` make failures inspectable.
 
-The current runner executes the local `codex` CLI directly.
+Relay resolves the local runner as issue `agent_runner` override → pipeline `agent_runner` → default `codex`.
+Supported local runners are `codex` and `claude`.
 
 ### Bundled Agent Skill
 
@@ -214,6 +215,7 @@ Fields:
 
 - `name`
 - `init_command`
+- `agent_runner` (optional: `codex` or `claude`; defaults to `codex` when omitted)
 - `loop_num` (optional, defaults to `20`)
 - `plan_prompt`
 - `coding_prompt`
@@ -230,6 +232,7 @@ Important fields:
 
 - `id`
 - `pipeline_name`
+- `agent_runner` (optional override; inherits the pipeline runner and then defaults to `codex`)
 - `goal`
 - `description`
 - `status`
@@ -303,7 +306,8 @@ npm install -g @eddiearc/relay
 Requirements:
 
 - macOS or Linux
-- `codex` installed and available in `PATH`
+- `codex` or `claude` installed and available in `PATH`
+- if neither the issue nor the pipeline sets `agent_runner`, Relay uses `codex`
 
 If you prefer building from source:
 
@@ -316,8 +320,9 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 For examples and workflow guidance, prefer `relay help` and `relay help <command>`.
 
 - `relay pipeline add <name> --init-command ... --plan-prompt-file ... --coding-prompt-file ...`
-- `relay pipeline edit <name> [--init-command ...] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
+- `relay pipeline edit <name> [--init-command ...] [--agent-runner codex|claude] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
 - `relay pipeline import -file pipeline.yaml`
+- `relay issue add --pipeline <name> [--agent-runner codex|claude] --goal ... --description ...`
 - `relay pipeline list`
 - `relay pipeline delete <name>`
 - `relay issue add --pipeline ... --goal ... --description ...`

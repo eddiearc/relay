@@ -3,6 +3,7 @@ package relay
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,60 @@ func TestStoreSavesPipelineAsYAML(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatalf("expected pipeline yaml to be written")
+	}
+}
+
+func TestStoreSavesPipelineAgentRunnerToYAML(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	if err := store.SavePipeline(Pipeline{
+		Name:         "demo-runner",
+		InitCommand:  "git init repo",
+		LoopNum:      2,
+		PlanPrompt:   "plan",
+		CodingPrompt: "code",
+		AgentRunner:  AgentRunnerClaude,
+	}); err != nil {
+		t.Fatalf("SavePipeline: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "pipelines", "demo-runner.yaml"))
+	if err != nil {
+		t.Fatalf("read pipeline yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "agent_runner: claude") {
+		t.Fatalf("expected pipeline yaml to persist agent_runner, got %s", string(data))
+	}
+}
+
+func TestStoreLoadIssueRejectsInvalidAgentRunner(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	issueDir := filepath.Join(root, "issues", "issue-invalid-runner")
+	if err := os.MkdirAll(issueDir, 0o755); err != nil {
+		t.Fatalf("mkdir issue dir: %v", err)
+	}
+	data := `{
+  "id": "issue-invalid-runner",
+  "pipeline_name": "demo",
+  "goal": "ship",
+  "description": "desc",
+  "status": "running",
+  "agent_runner": "cursor"
+}`
+	if err := os.WriteFile(filepath.Join(issueDir, "issue.json"), []byte(data), 0o644); err != nil {
+		t.Fatalf("write issue.json: %v", err)
+	}
+
+	_, err := store.LoadIssue("issue-invalid-runner")
+	if err == nil {
+		t.Fatal("expected invalid agent_runner to fail")
+	}
+	if !strings.Contains(err.Error(), "issue.agent_runner") {
+		t.Fatalf("expected issue.agent_runner error, got %v", err)
 	}
 }
