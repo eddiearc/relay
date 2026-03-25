@@ -76,7 +76,7 @@ Important fields:
 - `current_loop`
 - `artifact_dir`
 - `workspace_path`
-- `repo_path`
+- `workdir_path`
 - `last_error`
 - `interrupt_requested`
 
@@ -88,7 +88,7 @@ Each issue gets its own temporary workspace, by default under:
 ~/relay-workspaces/<issue-id>-<hash>/
 ```
 
-`init_command` runs there, and Relay then discovers the resulting `repo_path`.
+`init_command` runs there, and Relay then persists the resulting `workdir_path` for later agent runs.
 
 #### Issue Artifacts
 
@@ -116,7 +116,7 @@ When `relay serve` finds a `todo` issue, it runs this fixed flow:
 
 1. Create a workspace for the issue.
 2. Run `init_command` inside the workspace.
-3. Discover the initialized git repository root.
+3. Record the final working directory after `init_command`.
 4. Launch a dedicated planning agent.
 5. Have the planning agent create `feature_list.json` and `progress.txt`.
 6. Validate those artifacts.

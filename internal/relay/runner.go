@@ -13,7 +13,7 @@ import (
 
 type AgentRunRequest struct {
 	Phase    string
-	RepoPath string
+	Workdir  string
 	Prompt   string
 	IssueID  string
 	LoopID   string
@@ -52,14 +52,14 @@ func (r CodexRunner) Run(ctx context.Context, req AgentRunRequest) (AgentRunResu
 	finalMessagePath := filepath.Join(tempDir, "final-message.txt")
 	args := append([]string{}, spec.Args...)
 	args = append(args, "exec", "--dangerously-bypass-approvals-and-sandbox")
-	if req.RepoPath != "" {
-		args = append(args, "-C", req.RepoPath)
+	if req.Workdir != "" {
+		args = append(args, "-C", req.Workdir)
 	}
 	args = append(args, "-o", finalMessagePath, "-")
 
 	cmd := exec.CommandContext(ctx, spec.Command, args...)
-	if req.RepoPath != "" {
-		cmd.Dir = req.RepoPath
+	if req.Workdir != "" {
+		cmd.Dir = req.Workdir
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
 

@@ -7,7 +7,7 @@ You are the independent verification agent for this Relay E2E scenario.
 - `ISSUE_PATH`
 - `FEATURE_LIST_PATH`
 - `PROGRESS_PATH`
-- `REPO_PATH`
+- `WORKDIR_PATH`
 
 Your job is to independently verify the final repository output. Do not trust the execution agent's self-report.
 

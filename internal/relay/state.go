@@ -97,11 +97,19 @@ func (s *Store) LoadIssue(issueID string) (Issue, error) {
 	if err != nil {
 		return issue, err
 	}
-	if err := json.Unmarshal(data, &issue); err != nil {
+	var payload struct {
+		Issue
+		LegacyRepoPath string `json:"repo_path"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return issue, fmt.Errorf("parse issue.json: %w", err)
 	}
+	issue = payload.Issue
 	if issue.ArtifactDir == "" {
 		issue.ArtifactDir = s.IssueDir(issue.ID)
+	}
+	if issue.WorkdirPath == "" {
+		issue.WorkdirPath = payload.LegacyRepoPath
 	}
 	return issue, nil
 }

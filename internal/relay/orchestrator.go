@@ -6,9 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -30,7 +28,7 @@ type RunningTask struct {
 	Phase         string
 	CurrentLoop   int
 	WorkspacePath string
-	RepoPath      string
+	WorkdirPath   string
 	ActivePIDs    []int
 }
 
@@ -88,19 +86,19 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 	} else if stopped {
 		return latest, nil
 	} else {
-		issue = latest
+	issue = latest
 	}
 
-	repoPath, err := DiscoverRepoRoot(ctx, workspacePath)
+	workdirPath, err := resolveWorkdirPath(workspacePath, initResult.FinalDir)
 	if err != nil {
-		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("repo discovery failed: %v", err))
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("workdir resolution failed: %v", err))
 		return o.failIssue(issue, err)
 	}
-	issue.RepoPath = repoPath
+	issue.WorkdirPath = workdirPath
 	if err := o.Store.SaveIssue(issue); err != nil {
 		return issue, err
 	}
-	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("repo discovered path=%s", repoPath))
+	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("workdir selected path=%s", workdirPath))
 
 	issue.Status = IssueStatusPlanning
 	if err := o.setIssuePhase(&issue, "plan", true); err != nil {
@@ -171,7 +169,7 @@ func (o *Orchestrator) runPlanning(ctx context.Context, pipeline Pipeline, issue
 	prompt := BuildPrompt(*issue, "plan", 0, pipeline.PlanPrompt)
 	result, err := o.Runner.Run(ctx, AgentRunRequest{
 		Phase:    "plan",
-		RepoPath: issue.RepoPath,
+		Workdir:  issue.WorkdirPath,
 		Prompt:   prompt,
 		IssueID:  issue.ID,
 		LoopID:   "plan",
@@ -215,16 +213,12 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	if err != nil {
 		return false, err
 	}
-	beforeRev, err := gitRevision(issue.RepoPath)
-	if err != nil {
-		return false, fmt.Errorf("coding pre-check git revision: %w", err)
-	}
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d started", loop))
 	prompt := BuildPrompt(*issue, "coding", loop, pipeline.CodingPrompt) + TailContext(issue.ArtifactDir)
 	loopID := fmt.Sprintf("loop-%02d", loop)
 	result, err := o.Runner.Run(ctx, AgentRunRequest{
 		Phase:    "coding",
-		RepoPath: issue.RepoPath,
+		Workdir:  issue.WorkdirPath,
 		Prompt:   prompt,
 		IssueID:  issue.ID,
 		LoopID:   loopID,
@@ -251,10 +245,6 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	if err := ValidateFeatureTransition(beforeItems, afterItems); err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d validation failed: %v", loop, err))
 		return false, err
-	}
-	if err := ensureGitRevisionChanged(issue.RepoPath, beforeRev); err != nil {
-		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d validation failed: %v", loop, err))
-		return false, fmt.Errorf("coding loop %d must create a git commit: %w", loop, err)
 	}
 	done := AllFeaturesPassed(afterItems)
 	issue.LastError = ""
@@ -335,7 +325,7 @@ func (o *Orchestrator) setIssuePhase(issue *Issue, phase string, resetPIDs bool)
 	task.Phase = phase
 	task.CurrentLoop = issue.CurrentLoop
 	task.WorkspacePath = issue.WorkspacePath
-	task.RepoPath = issue.RepoPath
+	task.WorkdirPath = issue.WorkdirPath
 	if resetPIDs {
 		task.ActivePIDs = nil
 	}
@@ -360,7 +350,7 @@ func (o *Orchestrator) trackIssuePID(issue *Issue, phase string, pid int) {
 	task.Phase = phase
 	task.CurrentLoop = issue.CurrentLoop
 	task.WorkspacePath = issue.WorkspacePath
-	task.RepoPath = issue.RepoPath
+	task.WorkdirPath = issue.WorkdirPath
 	if !containsPID(task.ActivePIDs, pid) {
 		task.ActivePIDs = append(task.ActivePIDs, pid)
 	}
@@ -393,7 +383,7 @@ func copyRunningTask(task *RunningTask) RunningTask {
 		Phase:         task.Phase,
 		CurrentLoop:   task.CurrentLoop,
 		WorkspacePath: task.WorkspacePath,
-		RepoPath:      task.RepoPath,
+		WorkdirPath:   task.WorkdirPath,
 		ActivePIDs:    append([]int(nil), task.ActivePIDs...),
 	}
 }
@@ -407,67 +397,24 @@ func containsPID(pids []int, pid int) bool {
 	return false
 }
 
-func DiscoverRepoRoot(ctx context.Context, workspacePath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	cmd.Dir = workspacePath
-	if output, err := cmd.Output(); err == nil {
-		repoPath := strings.TrimSpace(string(output))
-		if repoPath != "" {
-			return repoPath, nil
-		}
-	}
-
-	var candidates []string
-	err := filepath.WalkDir(workspacePath, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Name() != ".git" {
-			return nil
-		}
-		candidates = append(candidates, filepath.Dir(path))
-		if entry.IsDir() {
-			return filepath.SkipDir
-		}
-		return nil
-	})
+func resolveWorkdirPath(workspacePath, finalDir string) (string, error) {
+	workspaceAbs, err := filepath.Abs(workspacePath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve workspace path: %w", err)
 	}
-	switch len(candidates) {
-	case 0:
-		return "", errors.New("init_command did not create a git repository")
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", fmt.Errorf("init_command created multiple repositories: %v", candidates)
+	if finalDir == "" {
+		return workspaceAbs, nil
 	}
-}
-
-func gitRevision(repoPath string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = repoPath
-	output, err := cmd.Output()
+	finalAbs, err := filepath.Abs(finalDir)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", nil
-		}
-		return "", err
+		return "", fmt.Errorf("resolve final workdir: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-func ensureGitRevisionChanged(repoPath, before string) error {
-	after, err := gitRevision(repoPath)
+	rel, err := filepath.Rel(workspaceAbs, finalAbs)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("compare workdir against workspace: %w", err)
 	}
-	if after == "" {
-		return errors.New("git HEAD is empty after agent run")
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("init_command finished outside the workspace: %s", finalAbs)
 	}
-	if after == before {
-		return errors.New("git HEAD did not change")
-	}
-	return nil
+	return finalAbs, nil
 }

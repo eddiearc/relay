@@ -82,7 +82,7 @@ func TestCodexRunnerRunDirectCLI(t *testing.T) {
 	runner := CodexRunner{Command: codexPath}
 	result, err := runner.Run(context.Background(), AgentRunRequest{
 		Phase:    "coding",
-		RepoPath: repoPath,
+		Workdir:  repoPath,
 		Prompt:   "hello from relay",
 		IssueID:  "issue-1",
 		LoopID:   "loop-01",

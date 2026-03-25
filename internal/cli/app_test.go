@@ -323,7 +323,7 @@ func TestStatusReadsIssueDirectoryState(t *testing.T) {
 		Status:        relay.IssueStatusRunning,
 		ArtifactDir:   filepath.Join(stateDir, "issues", "issue-status"),
 		WorkspacePath: "/tmp/workspace",
-		RepoPath:      "/tmp/repo",
+		WorkdirPath:   "/tmp/workspace/app",
 	})
 
 	var stdout bytes.Buffer

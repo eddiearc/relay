@@ -38,7 +38,7 @@ type Issue struct {
 	CurrentLoop        int    `json:"current_loop"`
 	ArtifactDir        string `json:"artifact_dir"`
 	WorkspacePath      string `json:"workspace_path"`
-	RepoPath           string `json:"repo_path"`
+	WorkdirPath        string `json:"workdir_path"`
 	ActivePhase        string `json:"active_phase"`
 	ActivePIDs         []int  `json:"active_pids"`
 	LastError          string `json:"last_error"`
@@ -119,7 +119,7 @@ func (i Issue) TemplateJSON() string {
 		CurrentLoop        int    `json:"current_loop"`
 		ArtifactDir        string `json:"artifact_dir"`
 		WorkspacePath      string `json:"workspace_path"`
-		RepoPath           string `json:"repo_path"`
+		WorkdirPath        string `json:"workdir_path"`
 		ActivePhase        string `json:"active_phase"`
 		ActivePIDs         []int  `json:"active_pids"`
 		InterruptRequested bool   `json:"interrupt_requested"`
@@ -132,7 +132,7 @@ func (i Issue) TemplateJSON() string {
 		CurrentLoop:        i.CurrentLoop,
 		ArtifactDir:        i.ArtifactDir,
 		WorkspacePath:      i.WorkspacePath,
-		RepoPath:           i.RepoPath,
+		WorkdirPath:        i.WorkdirPath,
 		ActivePhase:        i.ActivePhase,
 		ActivePIDs:         append([]int(nil), i.ActivePIDs...),
 		InterruptRequested: i.InterruptRequested,

@@ -607,7 +607,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "load issue: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "issue=%s status=%s loop=%d repo=%s workspace=%s artifact=%s\n", issue.ID, issue.Status, issue.CurrentLoop, issue.RepoPath, issue.WorkspacePath, issue.ArtifactDir)
+	_, _ = fmt.Fprintf(stdout, "issue=%s status=%s loop=%d workdir=%s workspace=%s artifact=%s\n", issue.ID, issue.Status, issue.CurrentLoop, issue.WorkdirPath, issue.WorkspacePath, issue.ArtifactDir)
 	if issue.ActivePhase != "" {
 		_, _ = fmt.Fprintf(stdout, "active_phase=%s active_pids=%v\n", issue.ActivePhase, issue.ActivePIDs)
 	}

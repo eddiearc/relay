@@ -80,7 +80,7 @@ Relay 并不是对文章做简单复刻，而是把里面对 “agent harness”
 - `current_loop`
 - `artifact_dir`
 - `workspace_path`
-- `repo_path`
+- `workdir_path`
 - `last_error`
 - `interrupt_requested`
 
@@ -92,7 +92,7 @@ Relay 并不是对文章做简单复刻，而是把里面对 “agent harness”
 ~/relay-workspaces/<issue-id>-<hash>/
 ```
 
-这里运行 `init_command`，并显式发现最终 `repo_path`。
+这里运行 `init_command`，并把最终落点目录持久化为 `workdir_path`，供后续 agent 运行使用。
 
 #### Artifacts
 
@@ -120,7 +120,7 @@ Relay 并不是对文章做简单复刻，而是把里面对 “agent harness”
 
 1. 创建 issue workspace。
 2. 在 workspace 内运行 `init_command`。
-3. 发现初始化后的 git repo 根目录，并写入 `repo_path`。
+3. 记录 `init_command` 结束时的工作目录，并写入 `workdir_path`。
 4. 启动 planning agent。
 5. planning agent 在 issue artifact 目录创建 `feature_list.json` 和 `progress.txt`。
 6. orchestrator 校验 artifact 文件是否合法。

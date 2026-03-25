@@ -1,6 +1,6 @@
 # Coding Prompt
 
-Implement the requested Go HTTP key-value server in `REPO_PATH`.
+Implement the requested Go HTTP key-value server in `WORKDIR_PATH`.
 
 ## Contract
 

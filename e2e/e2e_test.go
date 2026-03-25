@@ -87,8 +87,8 @@ func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 	if issue.Status != relay.IssueStatusDone {
 		t.Fatalf("expected done issue, got %q", issue.Status)
 	}
-	if issue.ArtifactDir == "" || issue.WorkspacePath == "" || issue.RepoPath == "" {
-		t.Fatalf("expected artifact/workspace/repo paths to be set, got %+v", issue)
+	if issue.ArtifactDir == "" || issue.WorkspacePath == "" || issue.WorkdirPath == "" {
+		t.Fatalf("expected artifact/workspace/workdir paths to be set, got %+v", issue)
 	}
 	if !strings.HasPrefix(issue.ArtifactDir, filepath.Join(stateDir, "issues")) {
 		t.Fatalf("expected issue artifact dir under temp state dir, got %s", issue.ArtifactDir)
@@ -96,8 +96,8 @@ func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 	if !strings.HasPrefix(issue.WorkspacePath, workspaceRoot) {
 		t.Fatalf("expected workspace under temp workspace root, got %s", issue.WorkspacePath)
 	}
-	if !strings.HasPrefix(issue.RepoPath, issue.WorkspacePath) {
-		t.Fatalf("expected repo under workspace, got repo=%s workspace=%s", issue.RepoPath, issue.WorkspacePath)
+	if !strings.HasPrefix(issue.WorkdirPath, issue.WorkspacePath) {
+		t.Fatalf("expected workdir under workspace, got workdir=%s workspace=%s", issue.WorkdirPath, issue.WorkspacePath)
 	}
 	if issue.ActivePhase != "" || len(issue.ActivePIDs) != 0 {
 		t.Fatalf("expected runtime fields cleared after completion, got phase=%q pids=%v", issue.ActivePhase, issue.ActivePIDs)
@@ -109,11 +109,11 @@ func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 		t.Fatalf("progress.txt missing: %v", err)
 	}
 
-	addOutput := runCommand(t, issue.RepoPath, "go", "run", ".", "add", "buy-milk")
+	addOutput := runCommand(t, issue.WorkdirPath, "go", "run", ".", "add", "buy-milk")
 	if strings.TrimSpace(addOutput) != "added: buy-milk" {
 		t.Fatalf("unexpected add output: %q", addOutput)
 	}
-	listOutput := runCommand(t, issue.RepoPath, "go", "run", ".", "list")
+	listOutput := runCommand(t, issue.WorkdirPath, "go", "run", ".", "list")
 	if strings.TrimSpace(listOutput) != "1. buy-milk" {
 		t.Fatalf("unexpected list output: %q", listOutput)
 	}
@@ -168,7 +168,7 @@ func (f *fakeEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 			{ID: "F-2", Title: "list todos", Description: "print stored todo items in order", Priority: 2, Passes: true},
 		})
 		appendProgress(tHelper{f.t}, artifactDir, "loop 1 complete")
-		updateTodoCLIRepo(f.t, req.RepoPath)
+		updateTodoCLIRepo(f.t, req.Workdir)
 	default:
 		f.t.Fatalf("unexpected phase %q", req.Phase)
 	}
@@ -373,7 +373,7 @@ The task is done only when the Go TODO CLI supports both:
 - a "list" command that prints stored todos in order
 `
 
-const realCodingPrompt = `Implement the requested Go TODO CLI behavior in REPO_PATH.
+const realCodingPrompt = `Implement the requested Go TODO CLI behavior in WORKDIR_PATH.
 
 Requirements:
 - "go run . add <item>" should persist the todo item

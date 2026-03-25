@@ -43,7 +43,7 @@ func TestOrchestratorCompletesIssueFromIssueArtifacts(t *testing.T) {
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, filepath.Dir(artifactDir), "loop 1 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "first.txt", "loop 1\n", "feat: finish first feature")
+				writeRepoChangeAndCommit(t, req.Workdir, "first.txt", "loop 1\n", "feat: finish first feature")
 			},
 			func(req AgentRunRequest) {
 				artifactDir := mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH=")
@@ -52,7 +52,7 @@ func TestOrchestratorCompletesIssueFromIssueArtifacts(t *testing.T) {
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
 				})
 				appendProgress(t, filepath.Dir(artifactDir), "loop 2 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "second.txt", "loop 2\n", "feat: finish all features")
+				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
 			},
 		},
 	})
@@ -101,7 +101,7 @@ func TestOrchestratorCompletesIssueFromIssueArtifacts(t *testing.T) {
 		"issue started",
 		"workspace created",
 		"init_command completed",
-		"repo discovered",
+		"workdir selected",
 		"planning started",
 		"coding loop=1 completed",
 		"issue completed",
@@ -199,7 +199,7 @@ func TestOrchestratorStopsAfterCurrentLoopWhenInterruptRequested(t *testing.T) {
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, artifactDir, "loop 1 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "first.txt", "loop 1\n", "feat: finish first feature")
+				writeRepoChangeAndCommit(t, req.Workdir, "first.txt", "loop 1\n", "feat: finish first feature")
 
 				latest, err := store.LoadIssue(issue.ID)
 				if err != nil {
@@ -269,7 +269,7 @@ func TestOrchestratorContinuesAfterCodingLoopError(t *testing.T) {
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
 				})
 				appendProgress(t, artifactDir, "loop 2 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "second.txt", "loop 2\n", "feat: finish all features")
+				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
 			},
 		},
 		codingErrs: []error{
@@ -347,7 +347,7 @@ func TestOrchestratorContinuesAfterCodingLoopPanic(t *testing.T) {
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
 				})
 				appendProgress(t, artifactDir, "loop 2 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "second.txt", "loop 2\n", "feat: finish all features")
+				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
 			},
 		},
 	})
@@ -430,7 +430,7 @@ func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
 					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
 				})
 				appendProgress(t, artifactDir, "loop 1 complete")
-				writeRepoChangeAndCommit(t, req.RepoPath, "done.txt", "done\n", "feat: finish feature")
+				writeRepoChangeAndCommit(t, req.Workdir, "done.txt", "done\n", "feat: finish feature")
 			},
 		},
 	})
@@ -456,8 +456,8 @@ func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
 	if task.CurrentLoop != 1 {
 		t.Fatalf("expected loop 1, got %d", task.CurrentLoop)
 	}
-	if task.WorkspacePath == "" || task.RepoPath == "" {
-		t.Fatalf("expected tracked paths, got workspace=%q repo=%q", task.WorkspacePath, task.RepoPath)
+	if task.WorkspacePath == "" || task.WorkdirPath == "" {
+		t.Fatalf("expected tracked paths, got workspace=%q workdir=%q", task.WorkspacePath, task.WorkdirPath)
 	}
 	if !containsPID(task.ActivePIDs, 41002) {
 		t.Fatalf("expected tracked pid 41002, got %v", task.ActivePIDs)
@@ -473,8 +473,8 @@ func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
 	if !containsPID(latest.ActivePIDs, 41002) {
 		t.Fatalf("expected persisted pid 41002, got %v", latest.ActivePIDs)
 	}
-	if latest.RepoPath == "" || latest.WorkspacePath == "" {
-		t.Fatalf("expected persisted paths, got workspace=%q repo=%q", latest.WorkspacePath, latest.RepoPath)
+	if latest.WorkdirPath == "" || latest.WorkspacePath == "" {
+		t.Fatalf("expected persisted paths, got workspace=%q workdir=%q", latest.WorkspacePath, latest.WorkdirPath)
 	}
 
 	close(release)
@@ -491,30 +491,22 @@ func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
 	}
 }
 
-func TestDiscoverRepoRootFallsBackToSingleGitDirectory(t *testing.T) {
+func TestResolveWorkdirPathUsesWorkspaceWhenFinalDirMissing(t *testing.T) {
 	workspace := t.TempDir()
-	repoPath := filepath.Join(workspace, "app")
-	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	found, err := DiscoverRepoRoot(context.Background(), workspace)
+	found, err := resolveWorkdirPath(workspace, "")
 	if err != nil {
-		t.Fatalf("DiscoverRepoRoot failed: %v", err)
+		t.Fatalf("resolveWorkdirPath failed: %v", err)
 	}
-	if found != repoPath {
-		t.Fatalf("expected %s, got %s", repoPath, found)
+	if found != filepath.Clean(workspace) {
+		t.Fatalf("expected %s, got %s", workspace, found)
 	}
 }
 
-func TestDiscoverRepoRootRejectsMultipleRepos(t *testing.T) {
+func TestResolveWorkdirPathRejectsDirectoryOutsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
-	for _, name := range []string{"app1", "app2"} {
-		if err := os.MkdirAll(filepath.Join(workspace, name, ".git"), 0o755); err != nil {
-			t.Fatalf("mkdir %s/.git: %v", name, err)
-		}
-	}
-	if _, err := DiscoverRepoRoot(context.Background(), workspace); err == nil {
-		t.Fatalf("expected multiple repo error")
+	outside := t.TempDir()
+	if _, err := resolveWorkdirPath(workspace, outside); err == nil {
+		t.Fatalf("expected outside-workspace error")
 	}
 }
 
