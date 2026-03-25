@@ -1019,7 +1019,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "recovered %d orphaned active issue(s)\n", recovered)
 	}
 	for {
-		processed, failed := processTodoIssues(ctx, orchestrator, store, stdout, stderr)
+		processed, failed := processTodoIssues(ctx, orchestrator, store, *stateDir, stdout, stderr)
 		if *runOnce {
 			if failed {
 				return 1
@@ -1114,6 +1114,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "pipeline %s saved to %s\n", pipeline.Name, store.PipelinePath(pipeline.Name))
+	writePipelineContinuationHints(stderr, pipeline.Name, *stateDir)
 	return 0
 }
 
@@ -1176,6 +1177,7 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "pipeline %s saved to %s\n", pipeline.Name, store.PipelinePath(pipeline.Name))
+	writePipelineContinuationHints(stderr, pipeline.Name, *stateDir)
 	return 0
 }
 
@@ -1213,6 +1215,7 @@ func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "pipeline %s imported to %s\n", pipeline.Name, store.PipelinePath(pipeline.Name))
+	writePipelineContinuationHints(stderr, pipeline.Name, *stateDir)
 	return 0
 }
 
@@ -1302,6 +1305,11 @@ func runPipelineList(args []string, stdout, stderr io.Writer) int {
 	for _, pipeline := range pipelines {
 		_, _ = fmt.Fprintf(stdout, "%s\t%d\t%s\n", pipeline.Name, pipeline.LoopNum, pipeline.InitCommand)
 	}
+	firstName := ""
+	if len(pipelines) > 0 {
+		firstName = pipelines[0].Name
+	}
+	writePipelineListHints(stderr, firstName, *stateDir)
 	return 0
 }
 
@@ -1372,6 +1380,7 @@ func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_ = writeIssue(stdout, issue)
+	writeIssueExecutionHints(stderr, issue.ID, *stateDir)
 	return 0
 }
 
@@ -1512,6 +1521,7 @@ func runIssueImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_ = writeIssue(stdout, issue)
+	writeIssueExecutionHints(stderr, issue.ID, *stateDir)
 	return 0
 }
 
@@ -1779,7 +1789,7 @@ func resolvePathWithDefault(path, fallback string) string {
 	return filepath.Join(cwd, path)
 }
 
-func processTodoIssues(ctx context.Context, orchestrator *relay.Orchestrator, store *relay.Store, stdout, stderr io.Writer) (processed bool, failed bool) {
+func processTodoIssues(ctx context.Context, orchestrator *relay.Orchestrator, store *relay.Store, rawStateDir string, stdout, stderr io.Writer) (processed bool, failed bool) {
 	issues, err := store.ListIssues()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "list issues: %v\n", err)
@@ -1790,6 +1800,7 @@ func processTodoIssues(ctx context.Context, orchestrator *relay.Orchestrator, st
 			continue
 		}
 		processed = true
+		writeServeWatchHint(stderr, issue, rawStateDir)
 		pipeline, err := store.LoadPipeline(issue.PipelineName)
 		if err != nil {
 			issue.Status = relay.IssueStatusFailed
