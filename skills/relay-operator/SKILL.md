@@ -24,19 +24,27 @@ For concrete operations, use the Relay CLI as the source of truth:
 - `relay help watch`
 - `relay help pipeline`
 - `relay help issue`
-- `relay pipeline match --repo <path>`
+- `relay pipeline list`
 - `relay pipeline show <name>`
 - `relay pipeline template`
-- `relay issue evaluate --pipeline <name> --goal "..." --description "..."`
 - `relay issue template`
+- `relay issue add --pipeline <name> --goal "..." --description "..."`
 - `relay watch -issue <id>`
 - `relay help upgrade`
 
 Rules:
 
 - do not restate Relay workflows from memory when CLI help already covers them
-- first resolve pipeline state through `pipeline match` / `pipeline show` before inventing project guidance
-- evaluate issue quality with `relay issue evaluate` before creating long-running work
+- inspect the current repository before choosing a pipeline
+- use `relay pipeline list` and `relay pipeline show` to inspect candidates
+- if one pipeline is clearly the right fit for the current repo and task, select it directly
+- if multiple pipelines are plausible or the fit is unclear, present the candidates and ask the user to choose
+- if no saved pipeline is clearly suitable, start from `relay pipeline template`, write a repository-specific pipeline, and import it
+- rewrite the task into a Relay-ready issue before creating it
+- if the issue is still too vague, ask the user several focused questions in one turn before creating it; those questions should cover:
+  - the target end result
+  - scope limits and explicit non-goals
+  - how completion should be verified
 - use `relay watch` for user-facing monitoring; keep `relay serve` as the executor
 - do not duplicate templates or deep operational guidance in this skill
 - if CLI help is insufficient, improve the CLI help instead of expanding this file

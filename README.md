@@ -69,8 +69,10 @@ The installed skill will guide the agent to:
 - run the opening `relay help` and `relay upgrade --check` check
 - use `relay help ...` as the operational source of truth
 - inspect the target repository
-- write a repository-specific Relay pipeline
+- inspect saved pipelines with `relay pipeline list` and `relay pipeline show`
+- select a clearly matching pipeline, ask the user to choose when multiple look plausible, or create a repository-specific pipeline from `relay pipeline template` when none fit
 - rewrite the task as a Relay issue with explicit acceptance criteria
+- ask several focused questions in one turn when the issue still lacks a clear end result, scope / non-goals, or verification path
 - run `relay serve --once` or explain how to run `relay serve` persistently
 - inspect Relay artifacts and host logs when something goes wrong
 

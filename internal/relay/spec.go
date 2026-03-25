@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -15,7 +16,9 @@ func LoadPipeline(path string) (Pipeline, error) {
 	if err != nil {
 		return pipeline, fmt.Errorf("read pipeline: %w", err)
 	}
-	if err := yaml.Unmarshal(data, &pipeline); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&pipeline); err != nil {
 		return pipeline, fmt.Errorf("parse pipeline: %w", err)
 	}
 	if err := pipeline.Normalize(); err != nil {

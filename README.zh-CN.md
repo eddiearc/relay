@@ -70,8 +70,10 @@ relay help serve
 - 用 `relay help ...` 作为具体操作的真相源
 - 检查 `relay` 是否已安装
 - 阅读目标仓库
-- 编写 repository-specific pipeline
+- 用 `relay pipeline list` 和 `relay pipeline show` 检查已有 pipeline
+- 如果某条 pipeline 明显匹配就直接选；如果有多个候选就让用户确认；如果没有合适的就从 `relay pipeline template` 开始创建 repository-specific pipeline
 - 把任务改写成带明确验收条件的 Relay issue
+- 如果目标结果、scope / 非目标、验证方式仍然不清楚，就一次性向用户提几个聚焦问题
 - 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
 - 出问题时检查 artifact 和宿主机日志
 

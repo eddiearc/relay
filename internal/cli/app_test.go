@@ -78,6 +78,14 @@ func TestTopLevelHelpIncludesWorkflowGuidance(t *testing.T) {
 			t.Fatalf("expected help output to contain %q, got %s", want, output)
 		}
 	}
+	for _, unwanted := range []string{
+		"relay help pipeline match",
+		"relay help issue evaluate",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected help output to omit %q, got %s", unwanted, output)
+		}
+	}
 }
 
 func TestPipelineHelp(t *testing.T) {
@@ -96,6 +104,14 @@ func TestPipelineHelp(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected pipeline help output to contain %q, got %s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"match",
+		"project metadata",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected pipeline help output to omit %q, got %s", unwanted, output)
 		}
 	}
 }
@@ -117,6 +133,15 @@ func TestPipelineAddHelpMatchesDetailedUsage(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected pipeline add help output to contain %q, got %s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"--project-key",
+		"--project-path",
+		"--project-remote-url",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("expected pipeline add help output to omit %q, got %s", unwanted, output)
 		}
 	}
 }
@@ -161,6 +186,9 @@ func TestPipelineTemplateCommandPrintsTemplate(t *testing.T) {
 			t.Fatalf("expected pipeline template output to contain %q, got %s", want, output)
 		}
 	}
+	if strings.Contains(output, "project:") {
+		t.Fatalf("expected pipeline template output to omit project block, got %s", output)
+	}
 }
 
 func TestIssueHelp(t *testing.T) {
@@ -180,6 +208,9 @@ func TestIssueHelp(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue help output to contain %q, got %s", want, output)
 		}
+	}
+	if strings.Contains(output, "evaluate") {
+		t.Fatalf("expected issue help output to omit evaluate, got %s", output)
 	}
 }
 
