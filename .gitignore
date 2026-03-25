@@ -3,6 +3,8 @@
 bin/
 dist/
 npm/out/
+!npm/bin/
+!npm/bin/relay.js
 
 coverage.out
 *.test
