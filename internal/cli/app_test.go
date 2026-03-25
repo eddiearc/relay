@@ -101,6 +101,7 @@ func TestPipelineHelp(t *testing.T) {
 		"relay pipeline import -file pipeline.yaml",
 		"relay pipeline template",
 		"relay help pipeline <subcommand>",
+		"repo-level E2E, integration, or CLI end-to-end checks",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected pipeline help output to contain %q, got %s", want, output)
@@ -129,6 +130,8 @@ func TestPipelineAddHelpMatchesDetailedUsage(t *testing.T) {
 		"--init-command",
 		"--plan-prompt-file",
 		"--coding-prompt-file",
+		"frontend pipelines should usually preserve browser-driven E2E",
+		"ask whether the direction looks right",
 		"15 is a reasonable upper bound",
 	} {
 		if !strings.Contains(output, want) {
@@ -204,6 +207,7 @@ func TestIssueHelp(t *testing.T) {
 		"relay issue add --pipeline demo",
 		"relay issue template",
 		"relay help issue <subcommand>",
+		"treat missing repo-level verification as a harness gap",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue help output to contain %q, got %s", want, output)
@@ -228,6 +232,8 @@ func TestIssueAddHelpMatchesDetailedUsage(t *testing.T) {
 		"--goal",
 		"--description",
 		"feature_list.json rules",
+		"frontend browser flows with simulated clicks",
+		"CLI command sequences that exercise the built or local binary",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue add help output to contain %q, got %s", want, output)
@@ -248,7 +254,7 @@ func TestIssueTemplateHelp(t *testing.T) {
 		"relay issue template > issue.json",
 		"Template:",
 		"\"pipeline_name\": \"repo-name\"",
-		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+		"\"description\": \"Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning.\"",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue template help output to contain %q, got %s", want, output)
@@ -267,7 +273,7 @@ func TestIssueTemplateCommandPrintsTemplate(t *testing.T) {
 	for _, want := range []string{
 		"\"pipeline_name\": \"repo-name\"",
 		"\"goal\": \"Describe the end state in one sentence.\"",
-		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+		"\"description\": \"Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning.\"",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue template output to contain %q, got %s", want, output)

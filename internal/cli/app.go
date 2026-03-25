@@ -158,6 +158,9 @@ Before writing a pipeline, inspect:
   - whether the repo is a monorepo
   - package manager and build toolchain
   - smallest verification commands that prove progress
+  - whether repo-level E2E, integration, or CLI end-to-end checks already exist
+  - which reusable test scripts, skills, or fixtures can be reused
+  - whether the task needs browser interaction, service startup, or local binary execution for realistic verification
   - whether codegen, Docker, DB setup, env vars, or private registries are required
 
 Examples:
@@ -184,6 +187,16 @@ Pipeline rules:
   - prefer shallow clones unless the task needs history
   - plan_prompt should force verifiable features and branch setup before coding
   - coding_prompt should force evidence-based FEATURE_LIST_PATH updates and PROGRESS_PATH handoff entries
+  - for meaningful behavior changes, default to the strongest realistic verification path for the project
+  - when a narrower verification path is enough, say that explicitly and explain the exception
+  - frontend pipelines should usually preserve browser-driven E2E or explicitly call out that it is missing
+  - backend pipelines should usually preserve startup or deployment verification plus integration checks
+  - CLI pipelines should usually preserve runnable local end-to-end command verification
+  - mobile or desktop pipelines should usually preserve simulator, emulator, or UI automation coverage
+  - library or SDK pipelines should usually preserve consumer-facing integration coverage
+  - worker or data pipelines should usually preserve fixture-driven end-to-end job or output checks
+  - infrastructure pipelines should usually preserve plan or dry-run validation plus smoke checks
+  - before using a pipeline for a real task, summarize the planning focus, coding focus, verification path, and missing coverage for the user and ask whether the direction looks right
   - real repo work should usually set loop_num explicitly; 15 is a reasonable upper bound
 
 Examples:
@@ -303,6 +316,8 @@ Issue writing rules:
   - goal should describe the end state in one sentence
   - description should preserve scope, constraints, non-goals, and verification signals
   - acceptance criteria should come from observable commands, API behavior, UI behavior, files, or service events
+  - if the task description is weak, say what is missing before creating the issue
+  - treat missing repo-level verification as a harness gap, not a detail to ignore
   - avoid vague criteria such as "implemented the logic" or "mostly done"
 
 Examples:
@@ -326,6 +341,13 @@ Good description inputs include:
   - verification commands such as go test ./..., npm run build, or tsc --noEmit
   - expected API status codes or response bodies
   - explicit non-goals and exclusions
+  - reusable scripts, skills, or fixtures that should be used for verification
+  - frontend browser flows with simulated clicks when UI behavior matters
+  - backend startup commands and integration checks against the running service
+  - CLI command sequences that exercise the built or local binary
+  - mobile or desktop app automation steps against a simulator, emulator, or packaged app shell
+  - library or SDK consumer examples that prove the public API works in a real caller context
+  - worker, queue, or data-pipeline fixture runs that prove emitted jobs or persisted outputs
 
 feature_list.json rules for downstream planning:
   - Relay requires a JSON array
@@ -522,7 +544,7 @@ coding_prompt: |
 var issueTemplateJSON = `{
   "pipeline_name": "repo-name",
   "goal": "Describe the end state in one sentence.",
-  "description": "Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning."
+  "description": "Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning."
 }
 `
 

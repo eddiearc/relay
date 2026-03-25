@@ -38,7 +38,7 @@ npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
 Start by running relay help and relay upgrade --check, and summarize whether Relay or the relay-operator skill should be refreshed.
-Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+Then inspect the repository, choose or write a repository-specific pipeline, summarize its planning focus, coding focus, verification path, reusable project assets, and any missing E2E or unit-test coverage in a few concise bullets, ask whether that direction sounds right, then rewrite the task as a Relay issue with explicit acceptance criteria, call out any weak goal, scope, non-goals, or verification details that still need correction, and tell me whether to run relay serve --once or relay serve persistently.
 ```
 
 第一次让 agent 接手之前，先运行：
@@ -72,6 +72,9 @@ relay help serve
 - 阅读目标仓库
 - 用 `relay pipeline list` 和 `relay pipeline show` 检查已有 pipeline
 - 如果某条 pipeline 明显匹配就直接选；如果有多个候选就让用户确认；如果没有合适的就从 `relay pipeline template` 开始创建 repository-specific pipeline
+- 在真正采用某条 pipeline 之前，先用几条简练 bullet 概括它的 planning 重点、coding 重点、验证路径、项目里可复用的资产，以及 E2E / 单测覆盖是否缺失
+- 如果 issue 的目标、scope、非目标、验证方式写得不清楚，要直接指出问题，而不是默默替用户脑补
+- 在真正创建 issue 前，要结合 pipeline 配置和 prompt 意图解释关键方向性决策，再让用户确认这个方向对不对
 - 把任务改写成带明确验收条件的 Relay issue
 - 如果目标结果、scope / 非目标、验证方式仍然不清楚，就一次性向用户提几个聚焦问题
 - 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
@@ -129,6 +132,30 @@ Relay 的产品思路主要受这两篇文章启发：
 
 - OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
 - Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- Anthropic: [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- Anthropic: [Building agents with the Claude Agent SDK](https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk/)
+
+### Verification Doctrine
+
+在 Relay 里，verification 不是可选补丁，而是 harness 契约的一部分。
+
+- OpenAI 的 harness engineering 文章强调，真正让 agent 稳定工作的关键是环境设计和 feedback loops，而不只是 prompt 文本本身。
+- Anthropic 的 eval 文章强调，真正该看的不是 agent 最后说了什么，而是环境里的最终状态；eval harness 应该把任务端到端跑完，再对结果打分。
+- Anthropic 的 agent SDK 文章也明确提到，对前端类工作要把浏览器自动化接进 workflow，让 agent 能直接检查截图、视口和交互元素。
+
+基于这些文章，Relay 进一步抽出了一套面向项目工作的操作政策：
+
+- 对于有实际行为变化的任务，agent 应默认选择“现实里最强、最贴近项目级”的验证路径
+- 如果某个任务不值得走更重的验证链路，也可以走更窄的验证，但要明确告诉用户这是例外，并说明原因
+- 前端项目通常应优先有浏览器 E2E，能够模拟点击等真实交互并验证关键用户路径
+- 后端项目通常应优先有本地启动或部署路径，以及针对运行中服务的集成验证
+- CLI 项目通常应优先有面向本地二进制或真实命令入口的端到端校验
+- 移动端或桌面端项目通常应优先有 simulator、emulator 或 UI 自动化，能够驱动真实应用壳层
+- 库或 SDK 项目通常应优先有面向使用方的集成测试、示例应用或 fixture project，用来覆盖公共 API
+- worker、队列、cron 或数据流水线项目通常应优先有基于 fixture 的端到端运行，验证任务投递、持久化产物或下游副作用
+- 基础设施或 IaC 项目通常应优先有可重复执行的 plan / dry-run 校验，以及针对目标环境或模拟目标的 smoke validation
+- 如果这些验证层还不存在，agent 要明确告诉用户这一点，并建议补对应的脚本、测试集或 skill，而不是假装任务已经定义完整
+- 即便有 E2E，单元测试缺失也依然是单独的风险信号，需要更明确地提示
 
 ### 这个产品在做什么
 
