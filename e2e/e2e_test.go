@@ -41,6 +41,81 @@ func TestServeRealCodexE2E(t *testing.T) {
 	runTodoWorkflow(t, stateDir, workspaceRoot)
 }
 
+func TestWatchReportsCompletedIssueAfterEndToEndServe(t *testing.T) {
+	requireGit(t)
+
+	stateDir := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
+
+	restore := cli.SetServeRunnerForTesting(func() relay.AgentRunner {
+		return &fakeEndToEndRunner{t: t}
+	})
+	t.Cleanup(restore)
+
+	runTodoWorkflow(t, stateDir, workspaceRoot)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := cli.RunWithIO([]string{
+		"watch",
+		"-issue", "issue-todo-e2e",
+		"--poll-interval", "10ms",
+		"-state-dir", stateDir,
+	}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("watch failed: %d: %s", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"status=done loop=1",
+		"progress=progress.txt entries=2 latest=loop 1 complete",
+		"event=",
+		"terminal_status=done",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected watch output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestWatchReportsFailedIssueAfterEndToEndServe(t *testing.T) {
+	requireGit(t)
+
+	stateDir := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
+
+	restore := cli.SetServeRunnerForTesting(func() relay.AgentRunner {
+		return &failingEndToEndRunner{t: t}
+	})
+	t.Cleanup(restore)
+
+	runFailingWorkflow(t, stateDir, workspaceRoot)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := cli.RunWithIO([]string{
+		"watch",
+		"-issue", "issue-todo-e2e-failed",
+		"--poll-interval", "10ms",
+		"-state-dir", stateDir,
+	}, &stdout, &stderr); exitCode != 2 {
+		t.Fatalf("watch failed to report terminal failure: %d: %s", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"status=failed loop=1",
+		"progress=progress.txt entries=1 latest=planning complete",
+		"event=",
+		"latest_run=loop-01.stderr.log: synthetic coding failure",
+		"terminal_status=failed",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected watch output to contain %q, got %s", want, output)
+		}
+	}
+}
+
 func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 	t.Helper()
 
@@ -51,7 +126,7 @@ func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 	if exitCode := cli.RunWithIO([]string{
 		"pipeline", "add",
 		"--init-command", todoInitCommand(),
-		"--loop-num", "2",
+		"--loop-num", "1",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
 		"-state-dir", stateDir,
@@ -173,6 +248,37 @@ func (f *fakeEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 		f.t.Fatalf("unexpected phase %q", req.Phase)
 	}
 	return relay.AgentRunResult{Stdout: "ok", FinalMessage: "done"}, nil
+}
+
+type failingEndToEndRunner struct {
+	t      *testing.T
+	coding int
+}
+
+func (f *failingEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (relay.AgentRunResult, error) {
+	if req.OnPID != nil {
+		req.OnPID(43000 + f.coding + 1)
+	}
+	switch req.Phase {
+	case "plan":
+		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "FEATURE_LIST_PATH="))
+		writeFeatureList(tHelper{f.t}, artifactDir, []relay.FeatureItem{
+			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: false},
+			{ID: "F-2", Title: "list todos", Description: "print stored todo items in order", Priority: 2, Passes: false},
+		})
+		appendProgress(tHelper{f.t}, artifactDir, "planning complete")
+		return relay.AgentRunResult{Stdout: "ok", FinalMessage: "planned"}, nil
+	case "coding":
+		f.coding++
+		return relay.AgentRunResult{
+			Stdout:   "attempted work",
+			Stderr:   "synthetic coding failure\nmore detail",
+			ExitCode: 1,
+		}, context.DeadlineExceeded
+	default:
+		f.t.Fatalf("unexpected phase %q", req.Phase)
+		return relay.AgentRunResult{}, nil
+	}
 }
 
 type tHelper struct{ *testing.T }
@@ -347,6 +453,60 @@ func runCommand(t *testing.T, workdir string, name string, args ...string) strin
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, output)
 	}
 	return string(output)
+}
+
+func runFailingWorkflow(t *testing.T, stateDir, workspaceRoot string) {
+	t.Helper()
+
+	planPrompt := writeTempFile(t, "plan.md", realPlanPrompt)
+	codingPrompt := writeTempFile(t, "coding.md", realCodingPrompt)
+
+	var stderr bytes.Buffer
+	if exitCode := cli.RunWithIO([]string{
+		"pipeline", "add",
+		"--init-command", todoInitCommand(),
+		"--loop-num", "1",
+		"--plan-prompt-file", planPrompt,
+		"--coding-prompt-file", codingPrompt,
+		"-state-dir", stateDir,
+		"todo-e2e-failed",
+	}, io.Discard, &stderr); exitCode != 0 {
+		t.Fatalf("pipeline add failed: %s", stderr.String())
+	}
+
+	stderr.Reset()
+	if exitCode := cli.RunWithIO([]string{
+		"issue", "add",
+		"--id", "issue-todo-e2e-failed",
+		"--pipeline", "todo-e2e-failed",
+		"--goal", "Support persistent todo add/list commands",
+		"--description", "Upgrade the sample Go CLI todo app to persist todos and list them.",
+		"-state-dir", stateDir,
+	}, io.Discard, &stderr); exitCode != 0 {
+		t.Fatalf("issue add failed: %s", stderr.String())
+	}
+
+	var serveStdout bytes.Buffer
+	stderr.Reset()
+	if exitCode := cli.RunWithIO([]string{
+		"serve",
+		"--once",
+		"-state-dir", stateDir,
+		"--workspace-root", workspaceRoot,
+	}, &serveStdout, &stderr); exitCode == 0 {
+		t.Fatalf("expected serve --once to fail")
+	}
+
+	issue := loadIssueSnapshot(t, stateDir, "issue-todo-e2e-failed")
+	if issue.Status != relay.IssueStatusFailed {
+		t.Fatalf("expected failed issue, got %q", issue.Status)
+	}
+	if _, err := os.Stat(relay.ProgressPath(issue.ArtifactDir)); err != nil {
+		t.Fatalf("progress.txt missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(relay.ProgressPath(issue.ArtifactDir)), "runs", "loop-01.stderr.log")); err != nil {
+		t.Fatalf("loop stderr log missing: %v", err)
+	}
 }
 
 func writeTempFile(t *testing.T, name, content string) string {
