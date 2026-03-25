@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	DefaultLoopNum = 15
+	DefaultLoopNum = 20
 
 	IssueStatusTodo        = "todo"
 	IssueStatusPlanning    = "planning"

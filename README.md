@@ -4,11 +4,101 @@ English | [中文](./README.zh-CN.md)
 
 ### What Relay Is
 
-Relay is a Go-based harness for long-running software-engineering agents.
+Relay is an agent-first, CLI-first harness framework for long-running software-engineering agents.
 
 It is not built around a single prompt-response loop. It is built around execution structure: persistent task state, repo initialization, planning before coding, looped fresh-agent runs, and explicit completion checks.
 
 Relay is designed for coding tasks that need more than one model turn and more than one context window.
+
+Fastest way to think about it:
+
+- agent-first: the primary UX is to let an agent operate Relay correctly
+- CLI-first: the system is controlled through explicit commands and persisted state
+- harness framework: Relay provides orchestration, memory, verification, and recovery around coding agents
+
+### Quick Start
+
+Preferred path for agent users: install the skill globally with `npx skills`, then use Relay through that skill from any supported agent.
+
+#### 1. Skill-First Quick Start
+
+Install the Relay CLI globally, then install the `relay-operator` skill globally:
+
+```bash
+npm install -g @eddiearc/relay && \
+npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
+```
+
+That keeps the skill available across your agents and repositories. If you explicitly want a project-local install instead, remove `-g`.
+
+Then prompt any agent that supports installed skills with something like:
+
+```text
+Use the installed relay-operator skill to set up Relay for <repository-path>.
+First verify that relay is installed.
+Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+The installed skill will guide the agent to:
+
+- inspect the target repository
+- write a repository-specific Relay pipeline
+- rewrite the task as a Relay issue with explicit acceptance criteria
+- run `relay serve --once` or explain how to run `relay serve` persistently
+- inspect Relay artifacts and host logs when something goes wrong
+
+#### 2. Direct CLI Quick Start
+
+If you want to use Relay directly, install it:
+
+```bash
+npm install -g @eddiearc/relay
+```
+
+Then create a pipeline:
+
+```bash
+relay pipeline add demo-pipeline \
+  --init-command 'git clone https://example.com/repo.git app' \
+  --plan-prompt-file plan.md \
+  --coding-prompt-file coding.md
+```
+
+If `--loop-num` is omitted, Relay defaults to `20`.
+
+Or import one:
+
+```bash
+relay pipeline import -file pipeline.yaml
+```
+
+Create an issue:
+
+```bash
+relay issue add \
+  --pipeline demo-pipeline \
+  --goal "Implement the requested feature" \
+  --description "Use the repository initialized by init_command."
+```
+
+Run the orchestrator:
+
+```bash
+relay serve
+```
+
+Or process the current queue once:
+
+```bash
+relay serve --once
+```
+
+### Related Essays
+
+Relay is strongly informed by these essays:
+
+- OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
+- Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
 ### Product Idea
 
@@ -23,12 +113,19 @@ Relay acts as an execution layer for coding agents:
 
 The current runner executes the local `codex` CLI directly.
 
+### Bundled Agent Skill
+
+This repository ships a project-local skill for other agents that need to operate the Relay CLI:
+
+```text
+skills/relay-operator/
+```
+
+That skill covers repository-specific pipeline authoring, issue decomposition with explicit acceptance criteria, persistent `relay serve` operation, and artifact plus host-log inspection.
+
+For skill installation, prefer the `npx skills` distribution flow instead of manually copying files.
+
 ### Inspiration
-
-This project is strongly influenced by two essays:
-
-- OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
-- Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
 Relay turns those ideas into a concrete product model for real repositories.
 
@@ -54,7 +151,7 @@ Fields:
 
 - `name`
 - `init_command`
-- `loop_num`
+- `loop_num` (optional, defaults to `20`)
 - `plan_prompt`
 - `coding_prompt`
 
@@ -149,45 +246,6 @@ If you prefer building from source:
 
 ```bash
 go install github.com/eddiearc/relay/cmd/relay@latest
-```
-
-### Quick Start
-
-Create a pipeline:
-
-```bash
-relay pipeline add demo-pipeline \
-  --init-command 'git clone https://example.com/repo.git app' \
-  --loop-num 3 \
-  --plan-prompt-file plan.md \
-  --coding-prompt-file coding.md
-```
-
-Or import one:
-
-```bash
-relay pipeline import -file pipeline.yaml
-```
-
-Create an issue:
-
-```bash
-relay issue add \
-  --pipeline demo-pipeline \
-  --goal "Implement the requested feature" \
-  --description "Use the repository initialized by init_command."
-```
-
-Run the orchestrator:
-
-```bash
-relay serve
-```
-
-Or process the current queue once:
-
-```bash
-relay serve --once
 ```
 
 ### Commands

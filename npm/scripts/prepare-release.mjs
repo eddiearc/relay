@@ -47,6 +47,11 @@ async function writeJson(targetPath, value) {
   await fs.writeFile(targetPath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function copyProjectDir(sourcePath, targetPath) {
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.cp(sourcePath, targetPath, { recursive: true });
+}
+
 function mainPackageManifest(version) {
   const optionalDependencies = Object.fromEntries(
     supportedPlatforms().map(({ os, arch }) => [packageNameForPlatform(os, arch), version]),
@@ -75,7 +80,7 @@ function mainPackageManifest(version) {
     bugs: {
       url: 'https://github.com/eddiearc/relay/issues',
     },
-    files: ['bin', 'lib', 'README.md'],
+    files: ['bin', 'lib', 'README.md', 'skills'],
     optionalDependencies,
     keywords: ['relay', 'cli', 'agent', 'codex', 'orchestrator'],
   };
@@ -172,6 +177,7 @@ async function main() {
     path.join(mainDir, 'lib', 'resolve-binary.mjs'),
   );
   await fs.copyFile(path.join(npmDir, 'lib', 'packaging.mjs'), path.join(mainDir, 'lib', 'packaging.mjs'));
+  await copyProjectDir(path.join(repoRoot, 'skills'), path.join(mainDir, 'skills'));
   await writeJson(path.join(mainDir, 'package.json'), mainPackageManifest(version));
   await writeRootReadme(path.join(mainDir, 'README.md'), versionTag);
 

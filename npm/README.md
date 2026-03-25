@@ -15,6 +15,16 @@ Relay ships to npm as one launcher package plus four platform-specific binary pa
 
 The platform packages contain only the prebuilt `relay` binary. npm selects them through their `os` and `cpu` fields, while the root package resolves the matching binary at runtime.
 
+## Bundled Skill
+
+The top-level `@eddiearc/relay` package also ships a project-local agent skill under:
+
+```text
+skills/relay-operator/
+```
+
+Use it as the canonical guide for agents that need to operate the Relay CLI against a repository.
+
 ## Local Packaging
 
 Build release archives first:

@@ -50,6 +50,13 @@ test('prepare-release generates the main package and platform packages from dist
   assert.equal(mainPackage.name, '@eddiearc/relay');
   assert.equal(mainPackage.version, '1.2.3');
   assert.equal(mainPackage.bin.relay, './bin/relay.js');
+  assert.ok(mainPackage.files.includes('skills'));
+
+  const skillContent = await fs.readFile(
+    path.join(outDir, 'relay', 'skills', 'relay-operator', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(skillContent, /Relay Operator/);
 
   const platformBinary = await fs.readFile(
     path.join(outDir, 'relay-darwin-arm64', 'bin', 'relay'),

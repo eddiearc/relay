@@ -27,6 +27,18 @@ Relay 是一个面向长任务的软件开发 Agent Harness。
 
 Relay 当前默认通过本机 `codex` CLI 执行 agent。
 
+### 项目内置 Agent Skill
+
+这个仓库内置了一份给其他 agent 使用的 Relay 操作 skill：
+
+```text
+skills/relay-operator/
+```
+
+它覆盖 repository-specific pipeline 编写、带明确验收条件的 issue 拆解、`relay serve` 常驻运行，以及结合 artifact 和宿主机日志排障。
+
+skill 的安装方式优先使用 `npx skills` 分发，而不是手动复制目录。
+
 ### 设计来源
 
 这个项目的产品思路主要受两篇文章启发：
@@ -172,15 +184,48 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 
 ### 快速开始
 
-#### 1. 准备一个 pipeline
+优先路径是：先通过 `npx skills` 全局安装 skill，再让支持 skills 的 agent 通过这个 skill 使用 Relay。
+
+#### 1. 通过 skill 快速开始
+
+先全局安装 Relay CLI，再全局安装 `relay-operator` skill：
+
+```bash
+npm install -g @eddiearc/relay && \
+npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
+```
+
+这样 skill 会对你的各个 agent / 仓库复用。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
+
+然后给任意支持已安装 skills 的 agent 这样一句指令：
+
+```text
+Use the installed relay-operator skill to set up Relay for <repository-path>.
+First verify that relay is installed.
+Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+这个 skill 会引导 agent 去：
+
+- 检查 `relay` 是否已安装
+- 阅读目标仓库
+- 编写 repository-specific pipeline
+- 把任务改写成带明确验收条件的 Relay issue
+- 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
+- 出问题时检查 artifact 和宿主机日志
+
+#### 2. 直接使用 CLI
+
+#### 2.1 准备一个 pipeline
 
 ```bash
 relay pipeline add demo-pipeline \
   --init-command 'git clone https://example.com/repo.git app' \
-  --loop-num 3 \
   --plan-prompt-file plan.md \
   --coding-prompt-file coding.md
 ```
+
+如果省略 `--loop-num`，Relay 会默认使用 `20`。
 
 也可以直接导入 YAML：
 
@@ -193,7 +238,7 @@ relay pipeline import -file pipeline.yaml
 ```yaml
 name: demo-pipeline
 init_command: git clone https://example.com/repo.git app
-loop_num: 3
+loop_num: 5
 plan_prompt: |
   Understand the task and repo. Create feature_list.json and progress.txt.
 coding_prompt: |
