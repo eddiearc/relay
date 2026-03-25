@@ -153,14 +153,6 @@ skills/relay-operator/
 - `relay serve` 常驻运行
 - 结合 artifact 和宿主机日志排障
 
-仓库里还提供了更细的内置参考文件，位置在：
-
-```text
-skills/relay-operator/references/
-```
-
-这些参考文件会随着 `relay-operator` 一起分发，所以只安装一个 skill 也能拿到更深的 pipeline / issue / monitor 指导。
-
 正式发布的 npm 包里还会带上 `skills/relay-operator/skill.json`。这个元数据会跟随发布 tag 写入版本号，用来让 skill 和打包出去的 Relay CLI 保持同一版本语义，并固定刷新命令。
 
 skill 的安装方式优先使用 `npx skills` 分发，而不是手动复制目录。

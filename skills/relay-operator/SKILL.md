@@ -5,50 +5,29 @@ description: Use when an agent needs to operate the Relay CLI end-to-end on a re
 
 # Relay Operator
 
-This skill is intentionally thin.
+This skill is only the agent adapter layer.
 
-Use it to route the agent into the Relay CLI, not to duplicate Relay product behavior in prompt text.
-
-## Default Opening
-
-Before touching the repository, run:
+Before doing Relay work:
 
 ```bash
 relay help
 relay version
 ```
 
-Then summarize:
-
-- which Relay version is installed
-- whether Relay should be upgraded
-- whether the bundled `relay-operator` skill should be refreshed with `npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y`
-- which Relay command family is relevant next
-
-## Source of Truth
-
-For all concrete Relay operations, use CLI help instead of re-explaining from memory:
+For concrete operations, use the Relay CLI as the source of truth:
 
 - `relay help`
 - `relay help serve`
 - `relay help pipeline`
-- `relay help pipeline add`
-- `relay help pipeline edit`
-- `relay help pipeline import`
 - `relay help issue`
-- `relay help issue add`
-- `relay help issue edit`
-- `relay help issue interrupt`
-- `relay help report`
-- `relay help status`
-- `relay help kill`
+- `relay pipeline template`
+- `relay issue template`
 - `relay help upgrade`
 
-If a user asks how to perform a Relay action, prefer quoting or summarizing the relevant CLI help output after running the matching help command.
+Rules:
 
-## Agent Behavior
-
-- treat `relay help` and `relay version` as the canonical startup path
-- use `relay help` output as the operational source of truth
-- do not duplicate long pipeline, issue, or monitoring playbooks in this skill
-- if the CLI help appears insufficient, improve the CLI help rather than growing this file
+- do not restate Relay workflows from memory when CLI help already covers them
+- do not duplicate templates or deep operational guidance in this skill
+- if CLI help is insufficient, improve the CLI help instead of expanding this file
+- if the bundled skill itself should be refreshed, use:
+  `npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y`

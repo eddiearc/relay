@@ -91,6 +91,7 @@ func TestPipelineHelp(t *testing.T) {
 	for _, want := range []string{
 		"manage persisted pipelines",
 		"relay pipeline import -file pipeline.yaml",
+		"relay pipeline template",
 		"relay help pipeline <subcommand>",
 	} {
 		if !strings.Contains(output, want) {
@@ -112,9 +113,52 @@ func TestPipelineAddHelpMatchesDetailedUsage(t *testing.T) {
 		"--init-command",
 		"--plan-prompt-file",
 		"--coding-prompt-file",
+		"15 is a reasonable upper bound",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected pipeline add help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestPipelineTemplateHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "pipeline", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"print a complete pipeline YAML template",
+		"relay pipeline template > pipeline.yaml",
+		"Template:",
+		"name: repo-name",
+		"coding_prompt:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline template help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestPipelineTemplateCommandPrintsTemplate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"name: repo-name",
+		"init_command:",
+		"plan_prompt:",
+		"coding_prompt:",
+		"Ensure the branch has an open pull request",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline template output to contain %q, got %s", want, output)
 		}
 	}
 }
@@ -130,6 +174,7 @@ func TestIssueHelp(t *testing.T) {
 	for _, want := range []string{
 		"manage persisted issues",
 		"relay issue add --pipeline demo",
+		"relay issue template",
 		"relay help issue <subcommand>",
 	} {
 		if !strings.Contains(output, want) {
@@ -151,9 +196,50 @@ func TestIssueAddHelpMatchesDetailedUsage(t *testing.T) {
 		"--pipeline",
 		"--goal",
 		"--description",
+		"feature_list.json rules",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue add help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestIssueTemplateHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "issue", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"print a complete issue JSON template",
+		"relay issue template > issue.json",
+		"Template:",
+		"\"pipeline_name\": \"repo-name\"",
+		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue template help output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestIssueTemplateCommandPrintsTemplate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"issue", "template"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"\"pipeline_name\": \"repo-name\"",
+		"\"goal\": \"Describe the end state in one sentence.\"",
+		"\"description\": \"Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning.\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue template output to contain %q, got %s", want, output)
 		}
 	}
 }
@@ -170,6 +256,8 @@ func TestServeHelp(t *testing.T) {
 		"start the polling orchestrator",
 		"--once",
 		"--poll-interval",
+		"Recommended startup sequence:",
+		"Diagnostic workflow:",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected serve help output to contain %q, got %s", want, output)

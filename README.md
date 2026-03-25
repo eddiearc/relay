@@ -152,14 +152,6 @@ Installing `relay-operator` is enough for normal use. It covers:
 - persistent `relay serve` operation
 - artifact plus host-log inspection
 
-The repository also ships deeper internal reference files under:
-
-```text
-skills/relay-operator/references/
-```
-
-Those reference files are bundled inside `relay-operator`, so a single installed skill still includes the deeper pipeline, issue, and monitoring guidance.
-
 Released npm packages also include `skills/relay-operator/skill.json`. That metadata is versioned with the published Relay tag so the skill can track the bundled CLI release and recommend a consistent refresh command.
 
 For skill installation, prefer the `npx skills` distribution flow instead of manually copying files.

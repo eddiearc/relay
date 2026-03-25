@@ -41,8 +41,8 @@ Examples:
 
 Commands:
   serve    Start the polling orchestrator
-  pipeline Add a persisted pipeline
-  issue    Add or inspect issues
+  pipeline Create, inspect, and print pipeline templates
+  issue    Create, inspect, and print issue templates
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
@@ -53,7 +53,9 @@ Commands:
 More help:
   relay help serve
   relay help pipeline add
+  relay help pipeline template
   relay help issue add
+  relay help issue template
 
 Skill refresh:
   npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
@@ -85,6 +87,24 @@ What it does:
   - polls for todo issues
   - runs planning once, then coding loops until completion or failure
 
+Recommended startup sequence:
+  1. relay serve --once
+  2. relay serve
+  3. move the service under nohup, launchd, systemd, or another supervisor only after foreground validation succeeds
+
+Mode selection:
+  - single pass for debugging: relay serve --once
+  - foreground validation: relay serve
+  - lightweight background process: nohup relay serve >> ~/.relay/logs/serve.log 2>&1 &
+  - production-style supervision: launchd, systemd, or another service manager
+
+Diagnostic workflow:
+  - relay issue list
+  - relay status -issue <issue-id>
+  - relay report -issue <issue-id>
+  - inspect feature_list.json, progress.txt, events.log, and runs/ under the issue artifact directory
+  - confirm host process state with ps, launchctl, systemctl, or journalctl as appropriate
+
 Examples:
   relay serve --once
   relay serve --poll-interval 10s
@@ -101,15 +121,24 @@ Subcommands:
   add      Create a pipeline from flags and prompt files
   edit     Update a saved pipeline
   import   Import a pipeline from YAML
+  template Print a full pipeline YAML template
   list     List saved pipelines
   delete   Delete a saved pipeline
 
 Typical flow:
-  1. Write or generate a pipeline YAML file, or prepare prompt files.
+  1. Start with "relay pipeline template" or prepare prompt files for "relay pipeline add".
   2. Save it with "relay pipeline import -file pipeline.yaml" or "relay pipeline add ...".
   3. Confirm it with "relay pipeline list".
 
+Before writing a pipeline, inspect:
+  - repository clone URL and default branch
+  - whether the repo is a monorepo
+  - package manager and build toolchain
+  - smallest verification commands that prove progress
+  - whether codegen, Docker, DB setup, env vars, or private registries are required
+
 Examples:
+  relay pipeline template
   relay pipeline import -file pipeline.yaml
   relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --plan-prompt-file plan.md --coding-prompt-file coding.md
   relay pipeline edit demo --loop-num 15
@@ -125,6 +154,13 @@ Required:
   --init-command         Shell command that prepares a fresh issue workspace
   --plan-prompt-file     Planner prompt template file
   --coding-prompt-file   Coding prompt template file
+
+Pipeline rules:
+  - init_command should usually create a fresh workspace checkout
+  - prefer shallow clones unless the task needs history
+  - plan_prompt should force verifiable features and branch setup before coding
+  - coding_prompt should force evidence-based FEATURE_LIST_PATH updates and PROGRESS_PATH handoff entries
+  - real repo work should usually set loop_num explicitly; 15 is a reasonable upper bound
 
 Examples:
   relay pipeline add demo \
@@ -154,8 +190,33 @@ var pipelineImportUsage = `import a pipeline from YAML.
 Usage:
   relay pipeline import -file <pipeline.yaml> [flags]
 
+Required pipeline YAML fields:
+  - name
+  - init_command
+  - plan_prompt
+  - coding_prompt
+
+Optional pipeline YAML fields:
+  - loop_num
+
+Use "relay pipeline template" to print a complete starting template.
+
 Examples:
   relay pipeline import -file pipeline.yaml
+`
+
+var pipelineTemplateUsage = `print a complete pipeline YAML template.
+
+Usage:
+  relay pipeline template
+
+What it prints:
+  - a full pipeline.yaml skeleton
+  - branch and PR guidance in the embedded prompts
+  - default loop_num guidance suitable for real repository work
+
+Examples:
+  relay pipeline template > pipeline.yaml
 `
 
 var pipelineListUsage = `list saved pipelines.
@@ -189,15 +250,24 @@ Subcommands:
   edit       Update a saved issue
   interrupt  Request interruption for a running issue
   import     Import an issue from JSON
+  template   Print a full issue JSON template
   list       List saved issues
   delete     Mark an inactive issue as deleted
 
 Typical flow:
-  1. Create or import an issue bound to an existing pipeline.
+  1. Start with "relay issue template" or write flags for "relay issue add".
+  2. Create or import an issue bound to an existing pipeline.
   2. Run "relay serve --once" to validate the setup.
   3. Inspect progress with "relay status" and "relay report".
 
+Issue writing rules:
+  - goal should describe the end state in one sentence
+  - description should preserve scope, constraints, non-goals, and verification signals
+  - acceptance criteria should come from observable commands, API behavior, UI behavior, files, or service events
+  - avoid vague criteria such as "implemented the logic" or "mostly done"
+
 Examples:
+  relay issue template
   relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
   relay issue list
   relay issue interrupt --id issue-123
@@ -212,6 +282,16 @@ Required:
   --pipeline      Existing pipeline name
   --goal          One-line end state
   --description   Scope, constraints, and verification details
+
+Good description inputs include:
+  - verification commands such as go test ./..., npm run build, or tsc --noEmit
+  - expected API status codes or response bodies
+  - explicit non-goals and exclusions
+
+feature_list.json rules for downstream planning:
+  - Relay requires a JSON array
+  - each item must use exactly: id, title, description, priority, passes, notes
+  - passes can only become true after verification
 
 Examples:
   relay issue add \
@@ -247,8 +327,23 @@ var issueImportUsage = `import an issue from JSON.
 Usage:
   relay issue import -file <issue.json> [flags]
 
+Use "relay issue template" to print a complete starting template.
+
 Examples:
   relay issue import -file issue.json
+`
+
+var issueTemplateUsage = `print a complete issue JSON template.
+
+Usage:
+  relay issue template
+
+What it prints:
+  - a full issue.json skeleton
+  - the expected shape for goal and description inputs
+
+Examples:
+  relay issue template > issue.json
 `
 
 var issueListUsage = `list saved issues.
@@ -323,6 +418,61 @@ Usage:
 Examples:
   relay version
 `
+
+var pipelineTemplateYAML = `name: repo-name
+init_command: |
+  set -e
+  git clone --depth 1 https://github.com/owner/repo .
+
+  if [ -f pnpm-lock.yaml ]; then
+    pnpm install --frozen-lockfile
+  elif [ -f package-lock.json ]; then
+    npm ci
+  elif [ -f yarn.lock ]; then
+    yarn install --frozen-lockfile
+  elif [ -f go.mod ]; then
+    go mod download
+  fi
+
+  if [ -f package.json ]; then
+    npm run build --if-present
+  fi
+loop_num: 15
+plan_prompt: |
+  Read the repository before planning.
+  If the current branch is main or master, create and switch to a task branch before finishing planning.
+  Use a readable branch name derived from the task goal, for example relay/<short-slug>.
+  Break the goal into the smallest meaningful features that can be verified.
+  Each feature description must include an observable acceptance condition.
+  Prefer evidence from tests, commands, API behavior, UI behavior, or generated files.
+  Keep features stable across loops. Avoid vague or overlapping features.
+coding_prompt: |
+  Do not make task changes directly on main or master.
+  Stay on the task branch created during planning. If no task branch exists yet, create one before editing code.
+  Make the smallest correct change in WORKDIR_PATH.
+  Verify progress with real commands where possible.
+  Commit the current loop's work before finishing.
+  Push the task branch before finishing.
+  Ensure the branch has an open pull request. Create one if it does not exist yet; otherwise update the existing PR instead of opening duplicates.
+  Update FEATURE_LIST_PATH based on verified state, not intention.
+  Record evidence or blockers in notes.
+  Append a concise handoff entry to PROGRESS_PATH before finishing.
+`
+
+var issueTemplateJSON = `{
+  "pipeline_name": "repo-name",
+  "goal": "Describe the end state in one sentence.",
+  "description": "Describe scope, constraints, validation commands, non-goals, and any known context that should shape feature planning."
+}
+`
+
+func pipelineTemplateHelpText() string {
+	return pipelineTemplateUsage + "\nTemplate:\n\n" + pipelineTemplateYAML
+}
+
+func issueTemplateHelpText() string {
+	return issueTemplateUsage + "\nTemplate:\n\n" + issueTemplateJSON
+}
 
 type installMethod string
 
@@ -510,6 +660,9 @@ func runPipelineHelp(args []string, stdout, stderr io.Writer) int {
 	case "import":
 		_, _ = io.WriteString(stdout, pipelineImportUsage)
 		return 0
+	case "template":
+		_, _ = io.WriteString(stdout, pipelineTemplateHelpText())
+		return 0
 	case "list":
 		_, _ = io.WriteString(stdout, pipelineListUsage)
 		return 0
@@ -539,6 +692,9 @@ func runIssueHelp(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "import":
 		_, _ = io.WriteString(stdout, issueImportUsage)
+		return 0
+	case "template":
+		_, _ = io.WriteString(stdout, issueTemplateHelpText())
 		return 0
 	case "list":
 		_, _ = io.WriteString(stdout, issueListUsage)
@@ -762,6 +918,8 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		return runPipelineEdit(args[1:], stdout, stderr)
 	case "import":
 		return runPipelineImport(args[1:], stdout, stderr)
+	case "template":
+		return runPipelineTemplate(args[1:], stdout, stderr)
 	case "list":
 		return runPipelineList(args[1:], stdout, stderr)
 	case "delete":
@@ -927,6 +1085,26 @@ func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runPipelineTemplate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("pipeline template", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineTemplateHelpText())
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "pipeline template does not take positional arguments\n")
+		return 1
+	}
+	_, _ = io.WriteString(stdout, pipelineTemplateYAML)
+	return 0
+}
+
 func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1013,6 +1191,8 @@ func runIssue(args []string, stdout, stderr io.Writer) int {
 		return runIssueInterrupt(args[1:], stdout, stderr)
 	case "import":
 		return runIssueImport(args[1:], stdout, stderr)
+	case "template":
+		return runIssueTemplate(args[1:], stdout, stderr)
 	case "list":
 		return runIssueList(args[1:], stdout, stderr)
 	case "delete":
@@ -1201,6 +1381,26 @@ func runIssueImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	_ = writeIssue(stdout, issue)
+	return 0
+}
+
+func runIssueTemplate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("issue template", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueTemplateHelpText())
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "issue template does not take positional arguments\n")
+		return 1
+	}
+	_, _ = io.WriteString(stdout, issueTemplateJSON)
 	return 0
 }
 
