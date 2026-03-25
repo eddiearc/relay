@@ -29,7 +29,7 @@ npm install -g @eddiearc/relay && \
 npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 ```
 
-这样 skill 会对你的各个 agent / 仓库复用。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
+这样 skill 会对你的各个 agent / 仓库复用。`relay-operator` 是默认的自包含安装入口。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
 
 然后给任意支持已安装 skills 的 agent 这样一句指令：
 
@@ -116,13 +116,26 @@ Relay 当前默认通过本机 `codex` CLI 执行 agent。
 
 ### 项目内置 Agent Skill
 
-这个仓库内置了一份给其他 agent 使用的 Relay 操作 skill：
+这个仓库内置了一份给其他 agent 使用的自包含顶层 skill：
 
 ```text
 skills/relay-operator/
 ```
 
-它覆盖 repository-specific pipeline 编写、带明确验收条件的 issue 拆解、`relay serve` 常驻运行，以及结合 artifact 和宿主机日志排障。
+只安装 `relay-operator` 就足够覆盖常见使用场景，包括：
+
+- repository-specific pipeline 编写
+- 带明确验收条件的 issue 拆解
+- `relay serve` 常驻运行
+- 结合 artifact 和宿主机日志排障
+
+仓库里还提供了更细的内置参考文件，位置在：
+
+```text
+skills/relay-operator/references/
+```
+
+这些参考文件会随着 `relay-operator` 一起分发，所以只安装一个 skill 也能拿到更深的 pipeline / issue / monitor 指导。
 
 skill 的安装方式优先使用 `npx skills` 分发，而不是手动复制目录。
 
