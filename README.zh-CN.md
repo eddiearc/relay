@@ -2,28 +2,115 @@
 
 [English](./README.md) | 中文
 
-### 项目简介
+### Relay 是什么
 
-Relay 是一个面向长任务的软件开发 Agent Harness。
+Relay 是一个面向长任务软件工程场景的 agent-first、CLI-first harness framework。
 
-它不是一个“单次 prompt 调一下模型”的工具，而是一个把任务拆成可持续执行、可恢复、可观测、可验证流程的调度层。Relay 用 Go 实现，围绕 `pipeline -> issue -> workspace -> artifacts -> loop` 这一套模型，把真实代码仓库上的 AI 执行过程托管起来。
+它不是一个“单次 prompt 调一下模型”的工具，而是一个围绕执行结构设计出来的调度层：持久化任务状态、初始化仓库、先 planning 再 coding、按 loop 启动 fresh agent，并且用显式校验来判断完成。
 
-当前版本重点解决的是软件开发场景里的三个问题：
+Relay 适用于那些需要不止一轮模型交互、也不止一个上下文窗口的真实编码任务。
 
-- 任务不是一次就能做完，需要多轮 planning / coding。
-- 模型上下文会丢，执行过程需要显式持久化。
-- 真正的完成判断不能只靠模型自述，而要靠结构化状态和外部验证。
+最快的理解方式：
+
+- agent-first：首选用法是让 agent 按正确流程来操作 Relay
+- CLI-first：系统通过明确的命令和持久化状态来驱动
+- harness framework：Relay 为编码 agent 提供 orchestration、memory、verification 和 recovery
+
+### 快速开始
+
+优先路径是：先通过 `npx skills` 全局安装 skill，再让支持 skills 的 agent 通过这个 skill 使用 Relay。
+
+#### 1. 通过 skill 快速开始
+
+先全局安装 Relay CLI，再全局安装 `relay-operator` skill：
+
+```bash
+npm install -g @eddiearc/relay && \
+npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
+```
+
+这样 skill 会对你的各个 agent / 仓库复用。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
+
+然后给任意支持已安装 skills 的 agent 这样一句指令：
+
+```text
+Use the installed relay-operator skill to set up Relay for <repository-path>.
+First verify that relay is installed.
+Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+这个 skill 会引导 agent 去：
+
+- 检查 `relay` 是否已安装
+- 阅读目标仓库
+- 编写 repository-specific pipeline
+- 把任务改写成带明确验收条件的 Relay issue
+- 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
+- 出问题时检查 artifact 和宿主机日志
+
+#### 2. 直接使用 CLI
+
+如果你想直接使用 Relay，先安装它：
+
+```bash
+npm install -g @eddiearc/relay
+```
+
+然后创建一个 pipeline：
+
+```bash
+relay pipeline add demo-pipeline \
+  --init-command 'git clone https://example.com/repo.git app' \
+  --plan-prompt-file plan.md \
+  --coding-prompt-file coding.md
+```
+
+如果省略 `--loop-num`，Relay 会默认使用 `20`。
+
+也可以直接导入 YAML：
+
+```bash
+relay pipeline import -file pipeline.yaml
+```
+
+创建一个 issue：
+
+```bash
+relay issue add \
+  --pipeline demo-pipeline \
+  --goal "Implement the requested feature" \
+  --description "Use the repository initialized by init_command."
+```
+
+启动 orchestrator：
+
+```bash
+relay serve
+```
+
+或者只跑当前待执行队列一次：
+
+```bash
+relay serve --once
+```
+
+### 相关文章
+
+Relay 的产品思路主要受这两篇文章启发：
+
+- OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
+- Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
 ### 这个产品在做什么
 
-你可以把 Relay 理解成一个专门服务于编码 Agent 的“执行外壳”：
+你可以把 Relay 理解成一个专门服务于编码 Agent 的执行层：
 
-- `pipeline` 定义项目级执行方式，包括初始化仓库的方法、循环次数、planning prompt、coding prompt。
-- `issue` 定义一次具体任务，包括目标、描述、所属 pipeline 和当前状态。
-- `serve` 常驻轮询 `todo` 任务，自动创建 workspace、初始化仓库、启动 planning agent、再按 loop 驱动 coding agent。
-- `feature_list.json` 作为任务完成的结构化真相源。
-- `progress.txt` 作为每轮之间的交接日志。
-- `runs/`、`events.log`、`issue.json` 作为问题排查和状态追踪依据。
+- `pipeline` 定义项目级执行契约
+- `issue` 定义一次具体任务
+- `serve` 轮询任务队列并驱动 planning 和 coding loops
+- `feature_list.json` 是任务完成的结构化真相源
+- `progress.txt` 是每轮之间的交接日志
+- `events.log`、`runs/` 和 `issue.json` 让失败和执行状态可追查
 
 Relay 当前默认通过本机 `codex` CLI 执行 agent。
 
@@ -41,16 +128,11 @@ skill 的安装方式优先使用 `npx skills` 分发，而不是手动复制目
 
 ### 设计来源
 
-这个项目的产品思路主要受两篇文章启发：
-
-- OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
-- Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
-
-Relay 并不是对文章做简单复刻，而是把里面对 “agent harness” 的关键判断，落成一个可以直接运行在代码仓库上的产品模型。
+Relay 并不是对相关文章做简单复刻，而是把里面对 agent harness 的关键判断，落成一个可以直接运行在代码仓库上的产品模型。
 
 对应到 Relay，大致体现为：
 
-- Prompt 不是核心，harness 才是核心。模型本身只是一环，真正决定稳定性的，是任务分阶段、状态持久化、失败恢复、外部验证这些机制。
+- Prompt 不是核心，harness 才是核心。真正决定稳定性的，是任务分阶段、状态持久化、失败恢复、外部验证这些机制。
 - 长任务必须有外部记忆。Relay 不依赖模型“记住上一次聊了什么”，而是把 `issue.json`、`feature_list.json`、`progress.txt`、`runs/` 都落到磁盘。
 - 要把“完成”从自然语言里剥离出来。Relay 不以模型最后一句“我完成了”为准，而是重新读取 `feature_list.json`，只有全部 `passes: true` 才算 done。
 - 每一轮 agent 都应该是 fresh run。Relay 的 planning 和每一轮 coding 都是新的执行，依赖持久化 artifact 恢复上下文，而不是绑定单个长 session。
@@ -70,7 +152,7 @@ Relay 并不是对文章做简单复刻，而是把里面对 “agent harness”
 
 - `name`
 - `init_command`
-- `loop_num`
+- `loop_num`（可选，默认值是 `20`）
 - `plan_prompt`
 - `coding_prompt`
 
@@ -165,111 +247,6 @@ npm install -g @eddiearc/relay
 
 ```bash
 go install github.com/eddiearc/relay/cmd/relay@latest
-```
-
-### 当前能力边界
-
-当前 Relay 主要聚焦于单仓库编码任务的托管：
-
-- 支持 pipeline / issue 的增删改查。
-- 支持 `serve` 持续轮询和 `serve --once` 单轮执行。
-- 支持 issue interrupt。
-- 支持 planning run + coding loop。
-- 支持 issue 级 artifact 持久化。
-- 支持真实 E2E 场景验证。
-
-当前默认 runner 是：
-
-- `codex` CLI 直连执行。
-
-### 快速开始
-
-优先路径是：先通过 `npx skills` 全局安装 skill，再让支持 skills 的 agent 通过这个 skill 使用 Relay。
-
-#### 1. 通过 skill 快速开始
-
-先全局安装 Relay CLI，再全局安装 `relay-operator` skill：
-
-```bash
-npm install -g @eddiearc/relay && \
-npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
-```
-
-这样 skill 会对你的各个 agent / 仓库复用。如果你明确希望安装到当前项目而不是全局目录，就去掉 `-g`。
-
-然后给任意支持已安装 skills 的 agent 这样一句指令：
-
-```text
-Use the installed relay-operator skill to set up Relay for <repository-path>.
-First verify that relay is installed.
-Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
-```
-
-这个 skill 会引导 agent 去：
-
-- 检查 `relay` 是否已安装
-- 阅读目标仓库
-- 编写 repository-specific pipeline
-- 把任务改写成带明确验收条件的 Relay issue
-- 决定应该执行 `relay serve --once` 还是常驻 `relay serve`
-- 出问题时检查 artifact 和宿主机日志
-
-#### 2. 直接使用 CLI
-
-#### 2.1 准备一个 pipeline
-
-```bash
-relay pipeline add demo-pipeline \
-  --init-command 'git clone https://example.com/repo.git app' \
-  --plan-prompt-file plan.md \
-  --coding-prompt-file coding.md
-```
-
-如果省略 `--loop-num`，Relay 会默认使用 `20`。
-
-也可以直接导入 YAML：
-
-```bash
-relay pipeline import -file pipeline.yaml
-```
-
-示例：
-
-```yaml
-name: demo-pipeline
-init_command: git clone https://example.com/repo.git app
-loop_num: 5
-plan_prompt: |
-  Understand the task and repo. Create feature_list.json and progress.txt.
-coding_prompt: |
-  Continue the task. Update feature_list.json and progress.txt based on actual progress.
-```
-
-#### 2. 创建一个 issue
-
-```bash
-relay issue add \
-  --pipeline demo-pipeline \
-  --goal "Implement the requested feature" \
-  --description "Use the repository initialized by init_command."
-```
-
-也可以导入 JSON：
-
-```bash
-relay issue import -file issue.json
-```
-
-#### 3. 启动 orchestrator
-
-```bash
-relay serve
-```
-
-或者只跑当前待执行队列一次：
-
-```bash
-relay serve --once
 ```
 
 ### 常用命令
