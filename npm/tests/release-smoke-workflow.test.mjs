@@ -12,7 +12,9 @@ test('release smoke workflow creates and cleans up a temporary draft release', (
   assert.match(workflow, /VERSION:\s+v0\.0\.0-smoke\.\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /gh release create "\$VERSION".*--draft/s);
   assert.match(workflow, /gh release upload "\$VERSION" dist\/\*\.tar\.gz --clobber/);
-  assert.match(workflow, /gh release delete "\$VERSION" --cleanup-tag --yes/);
+  assert.match(workflow, /gh release delete "\$VERSION" --yes/);
+  assert.match(workflow, /git ls-remote --exit-code --tags origin "\$VERSION"/);
+  assert.match(workflow, /git push origin ":refs\/tags\/\$VERSION"/);
 });
 
 test('release smoke workflow prepares npm packages without publishing them', () => {

@@ -78,5 +78,8 @@ jobs:
         if: ${{ always() }}
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release delete "$VERSION" --cleanup-tag --yes
+            gh release delete "$VERSION" --yes
+          fi
+          if git ls-remote --exit-code --tags origin "$VERSION" >/dev/null 2>&1; then
+            git push origin ":refs/tags/$VERSION"
           fi
