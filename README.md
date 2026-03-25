@@ -38,7 +38,7 @@ Then prompt any agent that supports installed skills with something like:
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
 Start by running relay help and relay upgrade --check, and summarize whether Relay or the relay-operator skill should be refreshed.
-Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+Then inspect the repository, choose or write a repository-specific pipeline, summarize its planning focus, coding focus, verification path, reusable project assets, and any missing E2E or unit-test coverage in a few concise bullets, ask whether that direction sounds right, then rewrite the task as a Relay issue with explicit acceptance criteria, call out any weak goal, scope, non-goals, or verification details that still need correction, and tell me whether to run relay serve --once or relay serve persistently.
 ```
 
 Before that first agent prompt, run:
@@ -71,6 +71,9 @@ The installed skill will guide the agent to:
 - inspect the target repository
 - inspect saved pipelines with `relay pipeline list` and `relay pipeline show`
 - select a clearly matching pipeline, ask the user to choose when multiple look plausible, or create a repository-specific pipeline from `relay pipeline template` when none fit
+- summarize the selected or proposed pipeline in a few concise bullets before proceeding, including planning focus, coding focus, verification path, reusable project assets, and whether E2E or unit-test coverage is missing
+- call out weak or missing issue inputs instead of silently guessing, especially around end state, scope, non-goals, and verification
+- explain the key directional choices from the pipeline configuration and prompt intent, then ask the user if that direction sounds right before creating the issue
 - rewrite the task as a Relay issue with explicit acceptance criteria
 - ask several focused questions in one turn when the issue still lacks a clear end result, scope / non-goals, or verification path
 - run `relay serve --once` or explain how to run `relay serve` persistently
@@ -128,6 +131,30 @@ Relay is strongly informed by these essays:
 
 - OpenAI: [Harness Engineering](https://openai.com/en/index/harness-engineering/)
 - Anthropic: [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- Anthropic: [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- Anthropic: [Building agents with the Claude Agent SDK](https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk/)
+
+### Verification Doctrine
+
+Relay treats verification as part of the harness contract, not as an optional afterthought.
+
+- OpenAI's harness engineering write-up argues that reliable agent work comes from designed environments and feedback loops, not from raw prompting alone.
+- Anthropic's eval guidance says the thing that matters is the final state in the environment, and that an eval harness should run tasks end to end and grade outcomes there.
+- Anthropic's agent SDK write-up explicitly recommends browser automation for rendered pages so agents can test screenshots, viewports, and interactive elements inside the workflow.
+
+From those sources, Relay derives the following operating policy for project work:
+
+- for meaningful behavior changes, agents should default to the strongest realistic project-level verification path
+- when a heavier path is not justified, agents may use a narrower verification path, but they should say that explicitly and explain why
+- frontend repos should usually prefer browser E2E that simulates clicks and validates real user journeys
+- backend repos should usually prefer a local startup or deployment path plus integration checks against the running service
+- CLI repos should usually prefer runnable end-to-end command checks against the built or local binary
+- mobile or desktop app repos should usually prefer simulator, emulator, or UI automation that drives the real app shell
+- library or SDK repos should usually prefer consumer-facing integration tests, example apps, or fixture projects that exercise the public API
+- worker, queue, cron, or data-pipeline repos should usually prefer fixture-driven end-to-end runs that assert emitted jobs, persisted outputs, or downstream side effects
+- infrastructure or IaC repos should usually prefer reproducible plan or dry-run checks plus smoke validation against the provisioned or simulated target
+- if those verification layers do not exist, the agent should say so explicitly, recommend the missing script, test suite, or skill, and avoid pretending the task is fully specified
+- missing unit tests are a separate red flag and should be called out even more strongly
 
 ### Product Idea
 
