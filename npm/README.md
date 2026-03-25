@@ -33,6 +33,8 @@ skills/relay-operator/references/
 
 Those reference files are bundled inside `skills/relay-operator/`, so the default install target remains self-contained.
 
+Released packages also rewrite `skills/relay-operator/skill.json` to the published Relay tag so the bundled skill can track the packaged CLI version and expose a stable refresh command.
+
 ## Local Packaging
 
 Build release archives first:

@@ -21,6 +21,23 @@ var usage = `relay is a goal-driven supervisor CLI.
 
 Usage:
   relay <command> [arguments]
+  relay help [command] [subcommand]
+
+Workflow:
+  1. relay help
+  2. relay version
+  3. relay help pipeline
+  4. relay help issue
+  5. relay serve --once
+
+Examples:
+  relay help
+  relay version
+  relay pipeline import -file pipeline.yaml
+  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay serve --once
+  relay status -issue issue-123
+  relay report -issue issue-123
 
 Commands:
   serve    Start the polling orchestrator
@@ -31,7 +48,15 @@ Commands:
   kill     Mark a saved issue as failed
   upgrade  Upgrade the relay CLI
   version  Show build version information
-  help     Show this help text
+  help     Show detailed help for a command or subcommand
+
+More help:
+  relay help serve
+  relay help pipeline add
+  relay help issue add
+
+Skill refresh:
+  npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 `
 
 var upgradeUsage = `upgrade the relay CLI.
@@ -41,6 +66,262 @@ Usage:
 
 The command detects whether relay was installed via npm or go install and
 runs the matching self-update command. Local builds are not self-upgradable.
+
+If you use the bundled relay-operator skill, refresh it separately with:
+  npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
+
+Examples:
+  relay upgrade
+`
+
+var serveUsage = `start the polling orchestrator.
+
+Usage:
+  relay serve [flags]
+
+What it does:
+  - loads persisted pipelines and issues from the Relay state directory
+  - recovers orphaned active issues
+  - polls for todo issues
+  - runs planning once, then coding loops until completion or failure
+
+Examples:
+  relay serve --once
+  relay serve --poll-interval 10s
+  relay serve --workspace-root /tmp/relay-workspaces
+`
+
+var pipelineUsage = `manage persisted pipelines.
+
+Usage:
+  relay pipeline <subcommand> [arguments]
+  relay help pipeline <subcommand>
+
+Subcommands:
+  add      Create a pipeline from flags and prompt files
+  edit     Update a saved pipeline
+  import   Import a pipeline from YAML
+  list     List saved pipelines
+  delete   Delete a saved pipeline
+
+Typical flow:
+  1. Write or generate a pipeline YAML file, or prepare prompt files.
+  2. Save it with "relay pipeline import -file pipeline.yaml" or "relay pipeline add ...".
+  3. Confirm it with "relay pipeline list".
+
+Examples:
+  relay pipeline import -file pipeline.yaml
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline edit demo --loop-num 15
+`
+
+var pipelineAddUsage = `create a pipeline from flags and prompt files.
+
+Usage:
+  relay pipeline add <name> --init-command <command> --plan-prompt-file <file> --coding-prompt-file <file> [flags]
+
+Required:
+  <name>                 Saved pipeline name
+  --init-command         Shell command that prepares a fresh issue workspace
+  --plan-prompt-file     Planner prompt template file
+  --coding-prompt-file   Coding prompt template file
+
+Examples:
+  relay pipeline add demo \
+    --init-command 'git clone --depth 1 https://github.com/owner/repo .' \
+    --plan-prompt-file plan.md \
+    --coding-prompt-file coding.md
+`
+
+var pipelineEditUsage = `update a saved pipeline.
+
+Usage:
+  relay pipeline edit <name> [flags]
+
+What can be changed:
+  --init-command
+  --loop-num
+  --plan-prompt-file
+  --coding-prompt-file
+
+Examples:
+  relay pipeline edit demo --loop-num 15
+  relay pipeline edit demo --coding-prompt-file coding-v2.md
+`
+
+var pipelineImportUsage = `import a pipeline from YAML.
+
+Usage:
+  relay pipeline import -file <pipeline.yaml> [flags]
+
+Examples:
+  relay pipeline import -file pipeline.yaml
+`
+
+var pipelineListUsage = `list saved pipelines.
+
+Usage:
+  relay pipeline list [flags]
+
+Examples:
+  relay pipeline list
+`
+
+var pipelineDeleteUsage = `delete a saved pipeline.
+
+Usage:
+  relay pipeline delete <name> [flags]
+
+The command refuses to delete a pipeline that is still referenced by an active issue.
+
+Examples:
+  relay pipeline delete demo
+`
+
+var issueUsage = `manage persisted issues.
+
+Usage:
+  relay issue <subcommand> [arguments]
+  relay help issue <subcommand>
+
+Subcommands:
+  add        Create an issue from flags
+  edit       Update a saved issue
+  interrupt  Request interruption for a running issue
+  import     Import an issue from JSON
+  list       List saved issues
+  delete     Mark an inactive issue as deleted
+
+Typical flow:
+  1. Create or import an issue bound to an existing pipeline.
+  2. Run "relay serve --once" to validate the setup.
+  3. Inspect progress with "relay status" and "relay report".
+
+Examples:
+  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay issue list
+  relay issue interrupt --id issue-123
+`
+
+var issueAddUsage = `create an issue from flags.
+
+Usage:
+  relay issue add --pipeline <name> --goal <goal> --description <description> [flags]
+
+Required:
+  --pipeline      Existing pipeline name
+  --goal          One-line end state
+  --description   Scope, constraints, and verification details
+
+Examples:
+  relay issue add \
+    --pipeline demo \
+    --goal "Add CLI summary output" \
+    --description "Update the command output and verify with go test ./..."
+`
+
+var issueEditUsage = `update a saved issue.
+
+Usage:
+  relay issue edit --id <issue-id> [flags]
+
+Examples:
+  relay issue edit --id issue-123 --goal "Refine summary output"
+  relay issue edit --id issue-123 --description "Updated scope and verification commands"
+`
+
+var issueInterruptUsage = `interrupt an issue.
+
+Usage:
+  relay issue interrupt --id <issue-id> [flags]
+
+If the issue is active, Relay records an interrupt request and the worker loop will stop at the next safe boundary.
+If the issue is not active yet, Relay marks it interrupted immediately.
+
+Examples:
+  relay issue interrupt --id issue-123
+`
+
+var issueImportUsage = `import an issue from JSON.
+
+Usage:
+  relay issue import -file <issue.json> [flags]
+
+Examples:
+  relay issue import -file issue.json
+`
+
+var issueListUsage = `list saved issues.
+
+Usage:
+  relay issue list [flags]
+
+Examples:
+  relay issue list
+`
+
+var issueDeleteUsage = `mark an inactive issue as deleted.
+
+Usage:
+  relay issue delete --id <issue-id> [flags]
+
+The command refuses to delete an active issue.
+
+Examples:
+  relay issue delete --id issue-123
+`
+
+var statusUsage = `show saved issue status.
+
+Usage:
+  relay status -issue <issue-id> [flags]
+
+What it prints:
+  - issue id
+  - status
+  - current loop number
+  - workspace path
+  - workdir path
+  - artifact directory
+  - active phase and pids when present
+  - last error and interrupt status when present
+
+Examples:
+  relay status -issue issue-123
+`
+
+var reportUsage = `print a saved issue report.
+
+Usage:
+  relay report -issue <issue-id> [flags]
+
+What it prints:
+  - the persisted issue JSON
+  - artifact paths for feature_list.json, progress.txt, and events.log
+  - run log file paths when available
+
+Examples:
+  relay report -issue issue-123
+`
+
+var killUsage = `mark a saved issue as failed and terminate tracked processes.
+
+Usage:
+  relay kill -issue <issue-id> [flags]
+
+Use this when an issue is stuck and you want Relay to stop the tracked worker pids and persist a failed state.
+
+Examples:
+  relay kill -issue issue-123
+`
+
+var versionUsage = `show build version information.
+
+Usage:
+  relay version
+
+Examples:
+  relay version
 `
 
 type installMethod string
@@ -167,8 +448,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		return runVersion(stdout)
 	case "help", "-h", "--help":
-		_, _ = io.WriteString(stdout, usage)
-		return 0
+		return runHelp(args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 1
@@ -178,6 +458,102 @@ func run(args []string, stdout, stderr io.Writer) int {
 func runVersion(stdout io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "relay %s\ncommit: %s\nbuilt: %s\n", version, commit, buildDate)
 	return 0
+}
+
+func runHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, usage)
+		return 0
+	}
+
+	switch args[0] {
+	case "serve":
+		_, _ = io.WriteString(stdout, serveUsage)
+		return 0
+	case "pipeline":
+		return runPipelineHelp(args[1:], stdout, stderr)
+	case "issue":
+		return runIssueHelp(args[1:], stdout, stderr)
+	case "status":
+		_, _ = io.WriteString(stdout, statusUsage)
+		return 0
+	case "report":
+		_, _ = io.WriteString(stdout, reportUsage)
+		return 0
+	case "kill":
+		_, _ = io.WriteString(stdout, killUsage)
+		return 0
+	case "upgrade":
+		_, _ = io.WriteString(stdout, upgradeUsage)
+		return 0
+	case "version":
+		_, _ = io.WriteString(stdout, versionUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown help topic %q\n\n%s", args[0], usage)
+		return 1
+	}
+}
+
+func runPipelineHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, pipelineUsage)
+		return 0
+	}
+	switch args[0] {
+	case "add":
+		_, _ = io.WriteString(stdout, pipelineAddUsage)
+		return 0
+	case "edit":
+		_, _ = io.WriteString(stdout, pipelineEditUsage)
+		return 0
+	case "import":
+		_, _ = io.WriteString(stdout, pipelineImportUsage)
+		return 0
+	case "list":
+		_, _ = io.WriteString(stdout, pipelineListUsage)
+		return 0
+	case "delete":
+		_, _ = io.WriteString(stdout, pipelineDeleteUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown pipeline help topic %q\n\n%s", args[0], pipelineUsage)
+		return 1
+	}
+}
+
+func runIssueHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, issueUsage)
+		return 0
+	}
+	switch args[0] {
+	case "add":
+		_, _ = io.WriteString(stdout, issueAddUsage)
+		return 0
+	case "edit":
+		_, _ = io.WriteString(stdout, issueEditUsage)
+		return 0
+	case "interrupt":
+		_, _ = io.WriteString(stdout, issueInterruptUsage)
+		return 0
+	case "import":
+		_, _ = io.WriteString(stdout, issueImportUsage)
+		return 0
+	case "list":
+		_, _ = io.WriteString(stdout, issueListUsage)
+		return 0
+	case "delete":
+		_, _ = io.WriteString(stdout, issueDeleteUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown issue help topic %q\n\n%s", args[0], issueUsage)
+		return 1
+	}
+}
+
+func isHelpArg(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help"
 }
 
 func runUpgrade(args []string, stdout, stderr io.Writer) int {
@@ -326,11 +702,18 @@ func setUpgradeLatestVersionLookupForTesting(fn func(method installMethod) (stri
 func runServe(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, serveUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	workspaceRoot := fs.String("workspace-root", "", "directory for relay workspaces (default: ~/relay-workspaces or RELAY_WORKSPACE_ROOT)")
 	pollInterval := fs.Duration("poll-interval", 5*time.Second, "issue polling interval")
 	runOnce := fs.Bool("once", false, "process the current todo queue once and exit")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 
@@ -366,8 +749,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 func runPipeline(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = io.WriteString(stderr, "pipeline requires a subcommand\n")
-		return 1
+		_, _ = io.WriteString(stdout, pipelineUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		return runPipelineHelp(args[1:], stdout, stderr)
 	}
 	switch args[0] {
 	case "add":
@@ -389,12 +775,19 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineAddUsage)
+		fs.PrintDefaults()
+	}
 	loopNum := fs.Int("loop-num", relay.DefaultLoopNum, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -438,12 +831,19 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineEditUsage)
+		fs.PrintDefaults()
+	}
 	loopNum := fs.Int("loop-num", 0, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -493,9 +893,16 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineImportUsage)
+		fs.PrintDefaults()
+	}
 	filePath := fs.String("file", "", "path to pipeline YAML")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *filePath == "" {
@@ -523,8 +930,15 @@ func runPipelineImport(args []string, stdout, stderr io.Writer) int {
 func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineDeleteUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -559,8 +973,15 @@ func runPipelineDelete(args []string, stdout, stderr io.Writer) int {
 func runPipelineList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pipeline list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, pipelineListUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	store := relay.NewStore(resolveStateDir(*stateDir))
@@ -577,8 +998,11 @@ func runPipelineList(args []string, stdout, stderr io.Writer) int {
 
 func runIssue(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = io.WriteString(stderr, "issue requires a subcommand\n")
-		return 1
+		_, _ = io.WriteString(stdout, issueUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		return runIssueHelp(args[1:], stdout, stderr)
 	}
 	switch args[0] {
 	case "add":
@@ -602,12 +1026,19 @@ func runIssue(args []string, stdout, stderr io.Writer) int {
 func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueAddUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "optional issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	issue := relay.Issue{
@@ -636,12 +1067,19 @@ func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueEditUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -682,9 +1120,16 @@ func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 func runIssueInterrupt(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue interrupt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueInterruptUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -724,9 +1169,16 @@ func runIssueInterrupt(args []string, stdout, stderr io.Writer) int {
 func runIssueImport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueImportUsage)
+		fs.PrintDefaults()
+	}
 	filePath := fs.String("file", "", "path to issue JSON")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *filePath == "" {
@@ -755,9 +1207,16 @@ func runIssueImport(args []string, stdout, stderr io.Writer) int {
 func runIssueDelete(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueDeleteUsage)
+		fs.PrintDefaults()
+	}
 	id := fs.String("id", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *id == "" {
@@ -806,8 +1265,15 @@ func saveNewIssue(store *relay.Store, issue relay.Issue, stderr io.Writer) error
 func runIssueList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("issue list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, issueListUsage)
+		fs.PrintDefaults()
+	}
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	store := relay.NewStore(resolveStateDir(*stateDir))
@@ -825,9 +1291,16 @@ func runIssueList(args []string, stdout, stderr io.Writer) int {
 func runStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, statusUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {
@@ -857,9 +1330,16 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 func runReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, reportUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {
@@ -892,9 +1372,16 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 func runKill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, killUsage)
+		fs.PrintDefaults()
+	}
 	issueID := fs.String("issue", "", "issue id")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *issueID == "" {

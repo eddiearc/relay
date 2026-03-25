@@ -35,12 +35,36 @@ Then prompt any agent that supports installed skills with something like:
 
 ```text
 Use the installed relay-operator skill to set up Relay for <repository-path>.
-First verify that relay is installed.
+Start by running relay help and relay version, and summarize whether Relay or the relay-operator skill should be refreshed.
 Then inspect the repository, write a repository-specific pipeline, rewrite the task as a Relay issue with explicit acceptance criteria, and tell me whether to run relay serve --once or relay serve persistently.
+```
+
+Before that first agent prompt, run:
+
+```bash
+relay help
+relay version
+```
+
+That gives one friendly opening check for:
+
+- current Relay version
+- the canonical command map and workflow
+- the exact `relay-operator` skill refresh command
+
+Relay CLI help is the source of truth for concrete operations. Prefer:
+
+```bash
+relay help
+relay help pipeline
+relay help issue
+relay help serve
 ```
 
 The installed skill will guide the agent to:
 
+- run the opening `relay help` and `relay version` check
+- use `relay help ...` as the operational source of truth
 - inspect the target repository
 - write a repository-specific Relay pipeline
 - rewrite the task as a Relay issue with explicit acceptance criteria
@@ -135,6 +159,8 @@ skills/relay-operator/references/
 ```
 
 Those reference files are bundled inside `relay-operator`, so a single installed skill still includes the deeper pipeline, issue, and monitoring guidance.
+
+Released npm packages also include `skills/relay-operator/skill.json`. That metadata is versioned with the published Relay tag so the skill can track the bundled CLI release and recommend a consistent refresh command.
 
 For skill installation, prefer the `npx skills` distribution flow instead of manually copying files.
 
@@ -263,6 +289,8 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 
 ### Commands
 
+For examples and workflow guidance, prefer `relay help` and `relay help <command>`.
+
 - `relay pipeline add <name> --init-command ... --plan-prompt-file ... --coding-prompt-file ...`
 - `relay pipeline edit <name> [--init-command ...] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
 - `relay pipeline import -file pipeline.yaml`
@@ -279,6 +307,7 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 - `relay status -issue <issue-id>`
 - `relay report -issue <issue-id>`
 - `relay kill -issue <issue-id>`
+- `relay upgrade`
 - `relay version`
 
 ### Build and Release

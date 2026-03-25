@@ -58,6 +58,11 @@ test('prepare-release generates the main package and platform packages from dist
   );
   assert.match(skillContent, /Relay Operator/);
 
+  const skillMetadata = JSON.parse(
+    await fs.readFile(path.join(outDir, 'relay', 'skills', 'relay-operator', 'skill.json'), 'utf8'),
+  );
+  assert.equal(skillMetadata.version, 'v1.2.3');
+
   const platformBinary = await fs.readFile(
     path.join(outDir, 'relay-darwin-arm64', 'bin', 'relay'),
     'utf8',

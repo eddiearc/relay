@@ -52,6 +52,14 @@ async function copyProjectDir(sourcePath, targetPath) {
   await fs.cp(sourcePath, targetPath, { recursive: true });
 }
 
+async function rewriteBundledSkillMetadata(skillsDir, versionTag) {
+  const skillMetadataPath = path.join(skillsDir, 'relay-operator', 'skill.json');
+  const content = await fs.readFile(skillMetadataPath, 'utf8');
+  const metadata = JSON.parse(content);
+  metadata.version = versionTag;
+  await writeJson(skillMetadataPath, metadata);
+}
+
 function mainPackageManifest(version) {
   const optionalDependencies = Object.fromEntries(
     supportedPlatforms().map(({ os, arch }) => [packageNameForPlatform(os, arch), version]),
@@ -178,6 +186,7 @@ async function main() {
   );
   await fs.copyFile(path.join(npmDir, 'lib', 'packaging.mjs'), path.join(mainDir, 'lib', 'packaging.mjs'));
   await copyProjectDir(path.join(repoRoot, 'skills'), path.join(mainDir, 'skills'));
+  await rewriteBundledSkillMetadata(path.join(mainDir, 'skills'), versionTag);
   await writeJson(path.join(mainDir, 'package.json'), mainPackageManifest(version));
   await writeRootReadme(path.join(mainDir, 'README.md'), versionTag);
 

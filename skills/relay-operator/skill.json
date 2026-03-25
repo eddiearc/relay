@@ -1,0 +1,8 @@
+{
+  "name": "relay-operator",
+  "version": "dev",
+  "source": "https://github.com/eddiearc/relay",
+  "recommended_install_command": "npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y",
+  "recommended_update_command": "npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y",
+  "notes": "Release packages rewrite version from dev to the published relay tag so the skill can track the bundled CLI release."
+}
