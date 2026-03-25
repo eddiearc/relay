@@ -12,9 +12,9 @@ The global skill is responsible for orchestration:
 
 The repository is responsible for project-specific definitions:
 - `scenario.yaml`: scenario contract, init command, issue metadata, verification targets
-- `plan_prompt.txt`: planning prompt for the execution agent
-- `coding_prompt.txt`: coding prompt for the execution agent
-- `verify_prompt.txt`: prompt for the independent verification agent
+- `plan_prompt.md`: planning prompt for the execution agent
+- `coding_prompt.md`: coding prompt for the execution agent
+- `verify_prompt.md`: prompt for the independent verification agent
 
 Current scenario:
 - `go-http-kv`: minimal Go HTTP key-value server with `GET /set` and `GET /get`

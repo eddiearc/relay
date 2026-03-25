@@ -80,8 +80,8 @@ func TestVersionCommandPrintsInjectedBuildMetadata(t *testing.T) {
 
 func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	stateDir := t.TempDir()
-	planPrompt := writeTempFile(t, "plan.txt", "plan {{issue}}")
-	codingPrompt := writeTempFile(t, "coding.txt", "code {{issue}}")
+	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
+	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
 
 	var stderr bytes.Buffer
 	exitCode := run([]string{

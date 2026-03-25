@@ -82,6 +82,6 @@ verify:
       expect_body: beta
 
 files:
-  plan_prompt: plan_prompt.txt
-  coding_prompt: coding_prompt.txt
-  verify_prompt: verify_prompt.txt
+  plan_prompt: plan_prompt.md
+  coding_prompt: coding_prompt.md
+  verify_prompt: verify_prompt.md

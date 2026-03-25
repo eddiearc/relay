@@ -44,8 +44,8 @@ func TestServeRealCodexE2E(t *testing.T) {
 func runTodoWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 	t.Helper()
 
-	planPrompt := writeTempFile(t, "plan.txt", realPlanPrompt)
-	codingPrompt := writeTempFile(t, "coding.txt", realCodingPrompt)
+	planPrompt := writeTempFile(t, "plan.md", realPlanPrompt)
+	codingPrompt := writeTempFile(t, "coding.md", realCodingPrompt)
 
 	var stderr bytes.Buffer
 	if exitCode := cli.RunWithIO([]string{

@@ -140,8 +140,8 @@ Create a pipeline:
 relay pipeline add demo-pipeline \
   --init-command 'git clone https://example.com/repo.git app' \
   --loop-num 3 \
-  --plan-prompt-file plan.txt \
-  --coding-prompt-file coding.txt
+  --plan-prompt-file plan.md \
+  --coding-prompt-file coding.md
 ```
 
 Or import one:
