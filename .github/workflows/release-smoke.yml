@@ -1,0 +1,82 @@
+name: Release Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to validate
+        required: false
+        default: main
+
+jobs:
+  smoke:
+    name: Validate release packaging without npm publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_REF: ${{ github.event.inputs.ref || github.sha }}
+      VERSION: v0.0.0-smoke.${{ github.run_id }}
+
+    steps:
+      - name: Check out repository at target ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TARGET_REF }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
+      - name: Run tests
+        run: |
+          make test
+          npm --prefix npm test
+
+      - name: Build release archives
+        run: make package-all VERSION="$VERSION"
+
+      - name: Create temporary draft release
+        run: |
+          gh release create "$VERSION" \
+            --target "$TARGET_REF" \
+            --draft \
+            --title "Smoke test $VERSION" \
+            --notes "Temporary release smoke test for workflow run $GITHUB_RUN_ID."
+
+      - name: Upload release assets
+        run: gh release upload "$VERSION" dist/*.tar.gz --clobber
+
+      - name: Generate npm packages
+        run: |
+          npm --prefix npm run prepare-release -- \
+            --version "$VERSION" \
+            --dist-dir "$GITHUB_WORKSPACE/dist" \
+            --out-dir "$GITHUB_WORKSPACE/npm/out"
+
+      - name: Verify generated npm packages
+        run: |
+          for package_dir in "$GITHUB_WORKSPACE"/npm/out/*; do
+            [ -d "$package_dir" ] || continue
+            npm pack --dry-run "$package_dir"
+          done
+
+      - name: Clean up temporary draft release
+        if: ${{ always() }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release delete "$VERSION" --cleanup-tag --yes
+          fi
