@@ -136,6 +136,25 @@ Relay 并不是对文章做简单复刻，而是把里面对 “agent harness”
 
 这两者分离后，Relay 可以避免把“完成判断”建立在一大段自然语言总结上。
 
+### 安装
+
+对外最快的安装方式：
+
+```bash
+npm install -g @eddiearc/relay
+```
+
+前提：
+
+- macOS 或 Linux
+- 本机已安装 `codex`，并且在 `PATH` 里
+
+如果你更偏向源码安装：
+
+```bash
+go install github.com/eddiearc/relay/cmd/relay@latest
+```
+
 ### 当前能力边界
 
 当前 Relay 主要聚焦于单仓库编码任务的托管：
@@ -254,6 +273,23 @@ make package
 make package-all
 ```
 
+基于这些 release 压缩包生成 npm 包：
+
+```bash
+npm --prefix npm run prepare-release -- \
+  --version v0.1.0 \
+  --dist-dir "$PWD/dist" \
+  --out-dir "$PWD/npm/out"
+```
+
+发布生成出来的 npm 包：
+
+```bash
+npm --prefix npm run publish-release -- \
+  --version v0.1.0 \
+  --packages-dir "$PWD/npm/out"
+```
+
 版本号本身不放在源码常量里硬编码，默认由 CI 读取 git tag 注入。仓库里的 GitHub Actions 会：
 
 - 直接复用本地 `Makefile`，保证本地和 CI 的打包逻辑一致
@@ -261,6 +297,8 @@ make package-all
 - 先执行 `make test`
 - 再执行 `make package-all VERSION=<release-tag>`
 - 最后把 `linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64` 四个压缩包上传到这个 release
+- 再根据这些压缩包生成 npm 包
+- 先发布四个平台包，再发布 `@eddiearc/relay`
 
 如果你想在本地手动指定版本号，也可以这样打包：
 
@@ -273,6 +311,8 @@ make package VERSION=v0.1.0
 ```bash
 gh release create v0.1.0 --generate-notes
 ```
+
+npm 包结构和首次接入 npm registry 的细节见 [`npm/README.md`](./npm/README.md)。
 
 当前还不建议发 Windows 包，因为运行时里有 `zsh` 和 `SIGKILL` 这样的 Unix 假设。
 

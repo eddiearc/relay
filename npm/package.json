@@ -1,0 +1,10 @@
+{
+  "name": "relay-npm-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ./tests/*.test.mjs",
+    "prepare-release": "node ./scripts/prepare-release.mjs",
+    "publish-release": "node ./scripts/publish-release.mjs"
+  }
+}

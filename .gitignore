@@ -2,6 +2,7 @@
 
 bin/
 dist/
+npm/out/
 
 coverage.out
 *.test

@@ -132,6 +132,25 @@ When `relay serve` finds a `todo` issue, it runs this fixed flow:
 
 That separation keeps completion logic out of free-form natural language.
 
+### Install
+
+Fastest install for end users:
+
+```bash
+npm install -g @eddiearc/relay
+```
+
+Requirements:
+
+- macOS or Linux
+- `codex` installed and available in `PATH`
+
+If you prefer building from source:
+
+```bash
+go install github.com/eddiearc/relay/cmd/relay@latest
+```
+
 ### Quick Start
 
 Create a pipeline:
@@ -217,6 +236,23 @@ Build all release archives that match CI:
 make package-all
 ```
 
+Generate npm packages from those release archives:
+
+```bash
+npm --prefix npm run prepare-release -- \
+  --version v0.1.0 \
+  --dist-dir "$PWD/dist" \
+  --out-dir "$PWD/npm/out"
+```
+
+Publish the generated npm packages:
+
+```bash
+npm --prefix npm run publish-release -- \
+  --version v0.1.0 \
+  --packages-dir "$PWD/npm/out"
+```
+
 Versioning is controlled by git tags in CI. The GitHub Actions workflow:
 
 - reuses the local `Makefile`, so CI and local packaging stay aligned
@@ -224,6 +260,8 @@ Versioning is controlled by git tags in CI. The GitHub Actions workflow:
 - runs `make test`
 - runs `make package-all VERSION=<release-tag>`
 - uploads `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` archives to that release
+- generates npm packages from those release archives
+- publishes the four platform packages first, then publishes `@eddiearc/relay`
 
 If you want a local build with explicit version metadata, use:
 
@@ -236,6 +274,8 @@ To trigger packaging in GitHub, publish a release for a tag such as `v0.1.0`. Fo
 ```bash
 gh release create v0.1.0 --generate-notes
 ```
+
+For the npm package layout and registry setup, see [`npm/README.md`](./npm/README.md).
 
 Windows packages are not published yet because the current runtime assumes Unix tools such as `zsh` and `SIGKILL`.
 
