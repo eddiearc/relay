@@ -160,6 +160,12 @@ func TestUpgradeRunsNPMCommand(t *testing.T) {
 		gotArgs = append([]string(nil), args...)
 		return []byte("updated"), nil
 	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		if method != installMethodNPM {
+			t.Fatalf("expected npm lookup, got %q", method)
+		}
+		return "v9.9.9", nil
+	})
 	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
 		return "v9.9.9", nil
 	})
@@ -167,6 +173,7 @@ func TestUpgradeRunsNPMCommand(t *testing.T) {
 		restoreExecutable()
 		restoreGoPaths()
 		restoreRunner()
+		restoreLatestVersionLookup()
 		restoreVersionLookup()
 	})
 
@@ -196,6 +203,12 @@ func TestUpgradeRunsGoInstallCommand(t *testing.T) {
 		gotArgs = append([]string(nil), args...)
 		return []byte("installed"), nil
 	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		if method != installMethodGoInstall {
+			t.Fatalf("expected go-install lookup, got %q", method)
+		}
+		return "v9.9.9", nil
+	})
 	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
 		return "v9.9.9", nil
 	})
@@ -203,6 +216,7 @@ func TestUpgradeRunsGoInstallCommand(t *testing.T) {
 		restoreExecutable()
 		restoreGoPaths()
 		restoreRunner()
+		restoreLatestVersionLookup()
 		restoreVersionLookup()
 	})
 
@@ -218,7 +232,51 @@ func TestUpgradeRunsGoInstallCommand(t *testing.T) {
 	}
 }
 
-func TestUpgradeReportsVersions(t *testing.T) {
+func TestUpgradeReportsAlreadyUpToDate(t *testing.T) {
+	previousVersion := version
+	version = "v1.2.3"
+	t.Cleanup(func() {
+		version = previousVersion
+	})
+
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	called := false
+	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
+		called = true
+		return []byte("updated"), nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "v1.2.3", nil
+	})
+	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
+		return "v1.2.3", nil
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreRunner()
+		restoreLatestVersionLookup()
+		restoreVersionLookup()
+	})
+
+	var stdout bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if called {
+		t.Fatalf("expected no upgrade command when already up to date")
+	}
+	if diff := strings.TrimSpace(stdout.String()); diff != "Already up to date (v1.2.3)" {
+		t.Fatalf("expected exact up-to-date output, got %q", diff)
+	}
+}
+
+func TestUpgradeReportsTransition(t *testing.T) {
 	previousVersion := version
 	version = "v1.2.3"
 	t.Cleanup(func() {
@@ -234,6 +292,9 @@ func TestUpgradeReportsVersions(t *testing.T) {
 	restoreRunner := setUpgradeCommandRunnerForTesting(func(name string, args ...string) ([]byte, error) {
 		return []byte("updated"), nil
 	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "v1.2.4", nil
+	})
 	restoreVersionLookup := setUpgradeVersionLookupForTesting(func(executable string) (string, error) {
 		return "v1.2.4", nil
 	})
@@ -241,6 +302,7 @@ func TestUpgradeReportsVersions(t *testing.T) {
 		restoreExecutable()
 		restoreGoPaths()
 		restoreRunner()
+		restoreLatestVersionLookup()
 		restoreVersionLookup()
 	})
 
@@ -248,11 +310,33 @@ func TestUpgradeReportsVersions(t *testing.T) {
 	if exitCode := run([]string{"upgrade"}, &stdout, io.Discard); exitCode != 0 {
 		t.Fatalf("expected success, got %d", exitCode)
 	}
-	output := stdout.String()
-	for _, want := range []string{"current version: v1.2.3", "new version: v1.2.4"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("expected output to contain %q, got %s", want, output)
-		}
+	if diff := strings.TrimSpace(stdout.String()); diff != "Upgraded: v1.2.3 → v1.2.4" {
+		t.Fatalf("expected exact upgrade output, got %q", diff)
+	}
+}
+
+func TestUpgradeReturnsLatestVersionLookupErrors(t *testing.T) {
+	restoreExecutable := setUpgradeExecutableForTesting(func() (string, error) {
+		return "/usr/local/lib/node_modules/@eddiearc/relay-darwin-arm64/bin/relay", nil
+	})
+	restoreGoPaths := setUpgradeGoPathsForTesting(func() (string, string, error) {
+		return "", "", nil
+	})
+	restoreLatestVersionLookup := setUpgradeLatestVersionLookupForTesting(func(method installMethod) (string, error) {
+		return "", errors.New("registry unavailable")
+	})
+	t.Cleanup(func() {
+		restoreExecutable()
+		restoreGoPaths()
+		restoreLatestVersionLookup()
+	})
+
+	var stderr bytes.Buffer
+	if exitCode := run([]string{"upgrade"}, io.Discard, &stderr); exitCode == 0 {
+		t.Fatalf("expected failure")
+	}
+	if !strings.Contains(stderr.String(), "check latest relay version") {
+		t.Fatalf("expected latest-version lookup error, got %s", stderr.String())
 	}
 }
 

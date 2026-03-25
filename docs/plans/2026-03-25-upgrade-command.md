@@ -1,93 +1,87 @@
-# Upgrade Command Implementation Plan
+# Relay Upgrade Command Implementation Plan
 
 > **For Codex:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a `relay upgrade` command that exposes help, detects supported install methods, executes the correct self-update command, reports versions, and fails clearly.
+**Goal:** Add a testable `relay upgrade` command that reports no-op and successful upgrades with explicit before/after version output.
 
-**Architecture:** Extend `internal/cli/app.go` with a dedicated `runUpgrade` path that depends on small injectable seams for install-source detection, command execution, and version lookup. Cover the behavior with focused tests in `internal/cli/app_test.go` before implementation, then validate the whole repository with the existing Make targets.
+**Architecture:** Extend the Go CLI dispatcher with an `upgrade` subcommand and keep the upgrade behavior behind injectable seams for version lookup and command execution so tests can exercise the real CLI entry point. The command will compare the currently running version to the latest published npm version, print the required contract, and only invoke the installer path when the versions differ.
 
-**Tech Stack:** Go, standard library `flag`/`os/exec`, existing Relay CLI test harness.
+**Tech Stack:** Go CLI (`internal/cli`), Node/npm distribution docs, `make` for repo verification.
 
 ---
 
-### Task 1: Add failing CLI tests for help and detection
+### Task 1: Add CLI coverage for `relay upgrade`
 
 **Files:**
-- Modify: `internal/cli/app_test.go`
 - Modify: `internal/cli/app.go`
+- Test: `internal/cli/app_test.go`
 
 **Step 1: Write the failing test**
-
-Add tests that assert `relay help` lists `upgrade`, `relay upgrade --help` returns usage text, install-source detection maps npm and `go install` paths correctly, and local builds print that self-upgrade is unavailable.
+- Add a test that invokes `run([]string{"upgrade"}, ...)` and asserts the command is recognized through the CLI dispatcher.
+- Add output assertions for both `Already up to date (vX.Y.Z)` and `Upgraded: vX.Y.Z → vA.B.C`.
 
 **Step 2: Run test to verify it fails**
-
-Run: `go test ./internal/cli -run 'Test(UsageListsUpgradeCommand|UpgradeHelp|DetectInstallMethod|UpgradeLocalBuildUnavailable)'`
-Expected: FAIL because `upgrade` is not registered yet.
+- Run: `go test ./internal/cli -run 'TestUpgrade'`
+- Expected: FAIL because `upgrade` is currently an unknown command.
 
 **Step 3: Write minimal implementation**
-
-Register `upgrade` in the top-level command switch and add a small detection helper plus help text.
+- Add `upgrade` to the help text and command switch.
+- Introduce injectable seams for current version lookup, latest version lookup, and upgrade command execution.
 
 **Step 4: Run test to verify it passes**
-
-Run: `go test ./internal/cli -run 'Test(UsageListsUpgradeCommand|UpgradeHelp|DetectInstallMethod|UpgradeLocalBuildUnavailable)'`
-Expected: PASS.
+- Run: `go test ./internal/cli -run 'TestUpgrade'`
+- Expected: PASS.
 
 **Step 5: Commit**
+- Run: `git add internal/cli/app.go internal/cli/app_test.go && git commit -m 'Add relay upgrade command'`
 
-Run: `git add internal/cli/app.go internal/cli/app_test.go docs/plans/$(date +%F)-upgrade-command.md && git commit -m "feat: add relay upgrade command"`
-
-### Task 2: Add failing tests for updater execution and version reporting
+### Task 2: Implement version transition behavior
 
 **Files:**
-- Modify: `internal/cli/app_test.go`
 - Modify: `internal/cli/app.go`
+- Test: `internal/cli/app_test.go`
 
 **Step 1: Write the failing test**
-
-Add tests that assert npm installs run `npm update -g @eddiearc/relay`, `go install` installs run `go install github.com/eddiearc/relay/cmd/relay@latest`, successful upgrades print the current and resulting versions, and execution errors bubble up with actionable messaging.
+- Add tests for latest-version lookup failure and installer failure so the command preserves non-zero exits and useful stderr.
 
 **Step 2: Run test to verify it fails**
-
-Run: `go test ./internal/cli -run 'Test(UpgradeRunsNPMCommand|UpgradeRunsGoInstallCommand|UpgradeReportsVersions|UpgradeReturnsCommandErrors)'`
-Expected: FAIL because the execution and reporting logic does not exist yet.
+- Run: `go test ./internal/cli -run 'TestUpgrade'`
+- Expected: FAIL because errors are not yet handled by the new command.
 
 **Step 3: Write minimal implementation**
-
-Add testable seams for command execution and post-upgrade version lookup, then implement the minimal output/error flow needed to satisfy the tests.
+- Normalize versions consistently.
+- Print `Already up to date (...)` on no-op.
+- Print `Upgraded: ... → ...` only after a successful installer invocation.
 
 **Step 4: Run test to verify it passes**
-
-Run: `go test ./internal/cli -run 'Test(UpgradeRunsNPMCommand|UpgradeRunsGoInstallCommand|UpgradeReportsVersions|UpgradeReturnsCommandErrors)'`
-Expected: PASS.
+- Run: `go test ./internal/cli -run 'TestUpgrade'`
+- Expected: PASS.
 
 **Step 5: Commit**
+- Run: `git add internal/cli/app.go internal/cli/app_test.go && git commit -m 'Refine upgrade status messages'`
 
-Run: `git add internal/cli/app.go internal/cli/app_test.go && git commit -m "feat: support relay self-upgrade"`
-
-### Task 3: Full verification and artifact updates
+### Task 3: Verify the repo and update Relay artifacts
 
 **Files:**
-- Modify: `docs/plans/$(date +%F)-upgrade-command.md`
-- Modify: `/Users/arc/.relay/issues/issue-7d8705e0fae3f0bf/feature_list.json`
-- Modify: `/Users/arc/.relay/issues/issue-7d8705e0fae3f0bf/progress.txt`
+- Modify: `docs/plans/2026-03-25-upgrade-command.md`
+- Modify: `/Users/arc/.relay/issues/issue-70031ad1f7f3eb34/feature_list.json`
+- Append: `/Users/arc/.relay/issues/issue-70031ad1f7f3eb34/progress.txt`
 
-**Step 1: Run repository verification**
+**Step 1: Run targeted tests**
+- Run: `go test ./internal/cli -run 'TestUpgrade'`
+- Expected: PASS.
 
-Run: `make build && make test`
-Expected: both commands exit 0.
+**Step 2: Run required verification**
+- Run: `make build`
+- Expected: exit 0.
+- Run: `make test`
+- Expected: exit 0.
 
-**Step 2: Verify branch and PR state**
+**Step 3: Update artifacts from verified state**
+- Mark feature items as passed only if the command and tests are verified.
+- Record concrete verification evidence or blockers in `notes`.
 
-Run: `git branch --show-current && gh pr view --json number,url,state,headRefName || gh pr create --fill`
-Expected: task branch stays open and has one PR.
-
-**Step 3: Update Relay artifacts**
-
-Record verified evidence in `feature_list.json` without flipping any passing feature back to false, then append a concise handoff note to `progress.txt`.
-
-**Step 4: Commit and push**
-
-Run: `git add ... && git commit -m "feat: add relay upgrade flow" && git push`
-Expected: branch is pushed successfully.
+**Step 4: Commit and publish branch state**
+- Run: `git add ... && git commit -m 'Improve relay upgrade output'`
+- Run: `git push origin HEAD`
+- Ensure a PR exists with `gh pr view` / `gh pr create`.
