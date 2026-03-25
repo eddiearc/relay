@@ -373,6 +373,8 @@ make package VERSION=v0.1.0
 gh release create v0.1.0 --generate-notes
 ```
 
+如果你想在发正式版本前先做一轮冒烟验证，可以在 Actions 页面手动运行 `Release Smoke Test` workflow。它会创建一个临时的草稿 release tag，例如 `v0.0.0-smoke.<run_id>`，上传各平台压缩包，生成 npm 包，并用 `npm pack --dry-run` 做一轮校验，最后再把这个临时 release 和 tag 清理掉。
+
 npm 包结构和首次接入 npm registry 的细节见 [`npm/README.md`](./npm/README.md)。
 
 推荐的 npm 发布方式是 GitHub Actions OIDC 的 Trusted Publishing。当前 release workflow 已经带上了 `id-token: write`；你只需要在 npm 后台为每个 `@eddiearc/*` 包配置 Trusted Publisher，并把 workflow filename 填成 `release.yml`。

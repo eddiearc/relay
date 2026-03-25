@@ -372,6 +372,8 @@ To trigger packaging in GitHub, publish a release for a tag such as `v0.1.0`. Fo
 gh release create v0.1.0 --generate-notes
 ```
 
+If you want to smoke-test the release pipeline before publishing a real version, run the `Release Smoke Test` workflow from the Actions tab. It creates a temporary draft release tag like `v0.0.0-smoke.<run_id>`, uploads the platform archives, generates the npm packages, validates them with `npm pack --dry-run`, and then deletes the temporary release and tag.
+
 For the npm package layout and registry setup, see [`npm/README.md`](./npm/README.md).
 
 The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The release workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release.yml`.

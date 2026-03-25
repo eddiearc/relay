@@ -15,12 +15,12 @@ jobs:
 
     steps:
       - name: Check out repository at release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -44,10 +44,10 @@ jobs:
         run: make package-all VERSION="$VERSION"
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: dist/*.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.release.tag_name }}
+        run: gh release upload "$VERSION" dist/*.tar.gz --clobber
 
       - name: Generate npm packages
         env:
