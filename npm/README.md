@@ -23,7 +23,15 @@ The top-level `@eddiearc/relay` package also ships a project-local agent skill u
 skills/relay-operator/
 ```
 
-Use it as the canonical guide for agents that need to operate the Relay CLI against a repository.
+Use it as the canonical self-contained skill for agents that need to operate the Relay CLI against a repository.
+
+The package also includes deeper internal reference files under:
+
+```text
+skills/relay-operator/references/
+```
+
+Those reference files are bundled inside `skills/relay-operator/`, so the default install target remains self-contained.
 
 ## Local Packaging
 

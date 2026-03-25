@@ -29,7 +29,7 @@ npm install -g @eddiearc/relay && \
 npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
 ```
 
-That keeps the skill available across your agents and repositories. If you explicitly want a project-local install instead, remove `-g`.
+That keeps the skill available across your agents and repositories. `relay-operator` is the self-contained default install. If you explicitly want a project-local install instead, remove `-g`.
 
 Then prompt any agent that supports installed skills with something like:
 
@@ -115,13 +115,26 @@ The current runner executes the local `codex` CLI directly.
 
 ### Bundled Agent Skill
 
-This repository ships a project-local skill for other agents that need to operate the Relay CLI:
+This repository ships a self-contained top-level skill for agents that need to operate the Relay CLI:
 
 ```text
 skills/relay-operator/
 ```
 
-That skill covers repository-specific pipeline authoring, issue decomposition with explicit acceptance criteria, persistent `relay serve` operation, and artifact plus host-log inspection.
+Installing `relay-operator` is enough for normal use. It covers:
+
+- repository-specific pipeline authoring
+- issue decomposition with explicit acceptance criteria
+- persistent `relay serve` operation
+- artifact plus host-log inspection
+
+The repository also ships deeper internal reference files under:
+
+```text
+skills/relay-operator/references/
+```
+
+Those reference files are bundled inside `relay-operator`, so a single installed skill still includes the deeper pipeline, issue, and monitoring guidance.
 
 For skill installation, prefer the `npx skills` distribution flow instead of manually copying files.
 
