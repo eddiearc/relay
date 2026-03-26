@@ -1,0 +1,37 @@
+manage persisted pipelines.
+
+Usage:
+  relay pipeline <subcommand> [arguments]
+  relay help pipeline <subcommand>
+
+Subcommands:
+  add      Create a pipeline from flags and prompt files
+  edit     Update a saved pipeline
+  import   Import a pipeline from YAML
+  show     Print a saved pipeline with a readable summary
+  template Print a full pipeline YAML template
+  list     List saved pipelines
+  delete   Delete a saved pipeline
+
+Typical flow:
+  1. Start with "relay pipeline template" or prepare prompt files for "relay pipeline add".
+  2. Save it with "relay pipeline import -file pipeline.yaml" or "relay pipeline add ...".
+  3. Confirm it with "relay pipeline list".
+
+Before writing a pipeline, inspect:
+  - repository clone URL and default branch
+  - whether the repo is a monorepo
+  - package manager and build toolchain
+  - smallest verification commands that prove progress
+  - whether repo-level E2E, integration, or CLI end-to-end checks already exist
+  - which reusable test scripts, skills, or fixtures can be reused
+  - whether the task needs browser interaction, service startup, or local binary execution for realistic verification
+  - whether codegen, Docker, DB setup, env vars, or private registries are required
+  - which agent_runner should execute the task: codex, claude, or the default codex fallback
+
+Examples:
+  relay pipeline template
+  relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline edit demo --loop-num 15 --agent-runner codex

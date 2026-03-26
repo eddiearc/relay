@@ -1,0 +1,18 @@
+[
+  {
+    "id": "verification-guide",
+    "title": "Write verification guide",
+    "description": "Document targeted and broad verification commands.",
+    "priority": 1,
+    "passes": false,
+    "notes": "Needs doc review."
+  },
+  {
+    "id": "golden-help",
+    "title": "Protect help output",
+    "description": "Add golden coverage for stable CLI help text.",
+    "priority": 2,
+    "passes": true,
+    "notes": "Verified with checked-in snapshots."
+  }
+]
