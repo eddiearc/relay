@@ -18,7 +18,8 @@ The repository is responsible for project-specific definitions:
 
 The bundled `relay-e2e` skill should treat these Markdown prompt files as the canonical contract.
 
-Current scenario:
-- `go-http-kv`: minimal Go HTTP key-value server with `GET /set` and `GET /get`
+Current scenarios:
+- `go-http-kv` (`scenario.yaml`): minimal Go HTTP key-value server using the default Codex runner
+- `go-http-kv-claude` (`scenario-claude.yaml`): same scenario using `agent_runner: claude`
 
 The intended entrypoint is the global `relay-e2e` skill, not `go test ./e2e`.

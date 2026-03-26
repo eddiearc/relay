@@ -1,0 +1,89 @@
+name: go-http-kv-claude
+description: Real Claude Code E2E scenario for Relay using a minimal Go HTTP key-value server.
+
+pipeline:
+  name: e2e-go-http-kv-claude
+  agent_runner: claude
+  loop_num: 2
+  init_command: |
+    set -e
+    mkdir repo
+    cd repo
+    git init
+    git config user.email relay@example.com
+    git config user.name relay
+    cat > go.mod <<'EOF'
+    module relaye2e
+
+    go 1.24.0
+    EOF
+    cat > main.go <<'EOF'
+    package main
+
+    import (
+      "fmt"
+      "net/http"
+      "os"
+    )
+
+    func main() {
+      port := os.Getenv("PORT")
+      if port == "" {
+        port = "8080"
+      }
+
+      mux := http.NewServeMux()
+      mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprintln(w, "relay e2e placeholder")
+      })
+
+      if err := http.ListenAndServe(":"+port, mux); err != nil {
+        panic(err)
+      }
+    }
+    EOF
+    git add go.mod main.go
+    git commit -m "init go http placeholder"
+
+issue:
+  id: issue-go-http-kv-claude
+  agent_runner: claude
+  goal: Implement a Go HTTP server with GET /set and GET /get and verify it works end-to-end.
+  description: |
+    Starting from the placeholder repository, implement an in-memory key-value HTTP server.
+
+    Contract:
+    - GET /set?key=a&value=b returns HTTP 200 with body `ok`
+    - GET /get?key=a returns HTTP 200 with body `b`
+    - Missing keys should return HTTP 404
+    - The server must run with `go run .`
+    - The server must respect the PORT environment variable and default to 8080
+    - Do not add third-party dependencies
+
+verify:
+  run_command: PORT={{port}} go run .
+  ready:
+    url: http://127.0.0.1:{{port}}/get?key=missing
+    expect_status: 404
+  checks:
+    - name: set foo
+      url: http://127.0.0.1:{{port}}/set?key=foo&value=bar
+      expect_status: 200
+      expect_body: ok
+    - name: get foo
+      url: http://127.0.0.1:{{port}}/get?key=foo
+      expect_status: 200
+      expect_body: bar
+    - name: set alpha
+      url: http://127.0.0.1:{{port}}/set?key=alpha&value=beta
+      expect_status: 200
+      expect_body: ok
+    - name: get alpha
+      url: http://127.0.0.1:{{port}}/get?key=alpha
+      expect_status: 200
+      expect_body: beta
+
+files:
+  plan_prompt: plan_prompt.md
+  coding_prompt: coding_prompt.md
+  verify_prompt: verify_prompt.md
