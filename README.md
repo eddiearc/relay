@@ -158,6 +158,8 @@ From those sources, Relay derives the following operating policy for project wor
 
 For the repository-native testing map and contributor command sequence, see `docs/verification.md`. The default proof path is targeted package tests, then `go test ./...`, then the smallest real `go run ./cmd/relay ...` commands that cover the changed user-facing surface.
 
+The reusable `e2e/plan_prompt.md`, `e2e/coding_prompt.md`, and `e2e/verify_prompt.md` examples should mirror that same philosophy: broader planning, narrower coding loops, and explicit verification ordering.
+
 ### Product Idea
 
 Relay acts as an execution layer for coding agents:
@@ -202,6 +204,18 @@ The main product takeaways are:
 - Completion should come from structured state, not just model narration.
 - Each run can be fresh if the right artifacts are persisted.
 - Real repo execution and verification matter more than toy demos.
+
+### Planning vs. Coding Split
+
+Relay's default execution model intentionally uses planning and coding at different resolutions.
+
+- planning should think in phases, dependencies, verification boundaries, and acceptance boundaries, especially for repo-wide or system-level work
+- planned features should be relatively closed loops of user-visible or verifier-visible progress, not scattered tiny file tasks
+- each coding loop should usually take one main feature, or at most a very small cluster of tightly related work, and decide its verification path before editing
+- unfinished rollout work should stay explicit in `feature_list.json`; `progress.txt` is for handoff context, not for silently shrinking scope
+- the default verification sequence is targeted package proof first, then `go test ./...`, then the smallest real `go run ./cmd/relay ...` commands that cover the changed CLI surface
+
+Current E2E gap: the shared `relay-e2e` skill currently treats a run as passing only when the issue reaches `done` and every item in `feature_list.json` is `passes: true`. That makes it good orchestration smoke coverage, but not yet a valid proof for the healthy intermediate state where a narrow coding loop lands one slice and leaves later features explicitly pending.
 
 ### Core Concepts
 

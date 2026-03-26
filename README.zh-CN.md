@@ -171,6 +171,18 @@ Relay 的产品思路主要受这两篇文章启发：
 Relay 会按这个顺序解析本机 runner：issue 的 `agent_runner` 覆盖 → pipeline 的 `agent_runner` → 默认 `codex`。
 当前支持的本机 runner 是 `codex` 和 `claude`。
 
+### Planning 和 Coding 的分工
+
+Relay 默认把 planning 和 coding 放在两个不同粒度上执行。
+
+- planning 默认站在 phase、依赖关系、验证边界、验收边界上思考，尤其是 repo 级或系统级改动
+- feature 更适合定义成相对闭环的功能切片，而不是零散的小文件任务
+- 每一轮 coding 默认只拿一个主 feature，最多再带一小簇紧耦合任务，并且在动手前先决定这一轮要怎么验证
+- 没做完的 rollout 范围必须继续留在 `feature_list.json` 里；`progress.txt` 负责交接，不负责偷偷缩 scope
+- 默认验证顺序是：先跑最贴切的包级 proof，再跑 `go test ./...`，最后跑能覆盖实际 CLI 表面的最小 `go run ./cmd/relay ...` 命令
+
+当前 E2E 缺口：共享的 `relay-e2e` skill 目前只有在 issue 进入 `done` 且 `feature_list.json` 全部 `passes: true` 时才算 PASS。所以它适合作为 orchestration smoke coverage，但还不能作为“某一轮 coding 只完成一个切片、其余 feature 继续显式 pending”这种健康中间态的验收证明。
+
 ### 项目内置 Agent Skill
 
 这个仓库内置了一份给其他 agent 使用的自包含顶层 skill：
