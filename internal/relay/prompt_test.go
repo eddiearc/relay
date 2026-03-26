@@ -47,6 +47,35 @@ func TestBuildPromptPlanIncludesArtifactSchemaAndRestrictions(t *testing.T) {
 	}
 }
 
+func TestBuildPromptPlanIncludesPhasedPlanningContract(t *testing.T) {
+	issue := Issue{
+		ID:            "issue-1",
+		PipelineName:  "demo",
+		Goal:          "goal",
+		Description:   "desc",
+		Status:        IssueStatusTodo,
+		ArtifactDir:   "/tmp/state/issues/issue-1",
+		WorkspacePath: "/tmp/workspaces/issue-1",
+		WorkdirPath:   "/tmp/workspaces/issue-1/repo",
+	}
+
+	prompt := BuildPrompt(issue, "plan", 0, "pipeline prompt")
+
+	for _, needle := range []string{
+		"Default to phased plans when the work is repo-wide, architecture-level, verification-system-level, or harness-level",
+		"Plan features as relatively closed loops of user-visible or system-verifiable progress, not as scattered representative tasks",
+		"Capture dependencies, rollout breadth, verification boundaries, and acceptance boundaries in the feature descriptions and notes",
+		"Prefer a plan that leaves later coding loops with one main feature at a time, while keeping remaining rollout work explicit until it is actually complete",
+	} {
+		if !strings.Contains(prompt, needle) {
+			t.Fatalf("prompt missing %q\n%s", needle, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Keep the plan minimal and dependency-free") {
+		t.Fatalf("prompt should not encourage dependency-free minimal planning by default\n%s", prompt)
+	}
+}
+
 func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 	issue := Issue{
 		ID:            "issue-1",
