@@ -188,6 +188,10 @@ func (s *Store) ListPipelines() ([]Pipeline, error) {
 	return pipelines, nil
 }
 
+func (s *Store) RunLogPath(issueID, name, suffix string) string {
+	return filepath.Join(s.RunDir(issueID), name+suffix)
+}
+
 func (s *Store) SaveRunLog(issueID, name, stdout, stderr, finalMessage string) error {
 	runDir := s.RunDir(issueID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {

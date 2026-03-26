@@ -167,19 +167,17 @@ func (o *Orchestrator) runPlanning(ctx context.Context, pipeline Pipeline, issue
 	}()
 	_ = o.Store.AppendEvent(issue.ID, "planning started")
 	prompt := BuildPrompt(*issue, "plan", 0, pipeline.PlanPrompt)
-	result, err := o.Runner.Run(ctx, AgentRunRequest{
-		Phase:    "plan",
-		Workdir:  issue.WorkdirPath,
-		Prompt:   prompt,
-		IssueID:  issue.ID,
-		LoopID:   "plan",
+	_, err = o.Runner.Run(ctx, AgentRunRequest{
+		Phase:   "plan",
+		Workdir: issue.WorkdirPath,
+		Prompt:  prompt,
+		IssueID: issue.ID,
+		LoopID:  "plan",
+		LogDir:  o.Store.RunDir(issue.ID),
 		OnPID: func(pid int) {
 			o.trackIssuePID(issue, "plan", pid)
 		},
 	})
-	if saveErr := o.Store.SaveRunLog(issue.ID, "plan", result.Stdout, result.Stderr, result.FinalMessage); saveErr != nil {
-		return saveErr
-	}
 	if err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("planning failed: %v", err))
 		return err
@@ -216,19 +214,17 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d started", loop))
 	prompt := BuildPrompt(*issue, "coding", loop, pipeline.CodingPrompt) + TailContext(issue.ArtifactDir)
 	loopID := fmt.Sprintf("loop-%02d", loop)
-	result, err := o.Runner.Run(ctx, AgentRunRequest{
-		Phase:    "coding",
-		Workdir:  issue.WorkdirPath,
-		Prompt:   prompt,
-		IssueID:  issue.ID,
-		LoopID:   loopID,
+	_, err = o.Runner.Run(ctx, AgentRunRequest{
+		Phase:   "coding",
+		Workdir: issue.WorkdirPath,
+		Prompt:  prompt,
+		IssueID: issue.ID,
+		LoopID:  loopID,
+		LogDir:  o.Store.RunDir(issue.ID),
 		OnPID: func(pid int) {
 			o.trackIssuePID(issue, "coding", pid)
 		},
 	})
-	if saveErr := o.Store.SaveRunLog(issue.ID, loopID, result.Stdout, result.Stderr, result.FinalMessage); saveErr != nil {
-		return false, saveErr
-	}
 	if err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d failed: %v", loop, err))
 		return false, err
