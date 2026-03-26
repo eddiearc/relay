@@ -326,6 +326,60 @@ func TestWatchReturnsFailureSummary(t *testing.T) {
 	}
 }
 
+func TestWatchRemindsToRunServeWhenIssueHasNotStarted(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-watch-start")
+	store := relay.NewStore(stateDir)
+	store.WorkspaceRoot = filepath.Join(stateDir, "workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("ensure store: %v", err)
+	}
+
+	issue := relay.Issue{
+		ID:           "issue-watch-start",
+		PipelineName: "demo-watch-start",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusTodo,
+	}
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("save issue: %v", err)
+	}
+
+	done := make(chan int, 1)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	go func() {
+		done <- run([]string{"watch", "-issue", issue.ID, "--poll-interval", "10ms", "-state-dir", stateDir}, &stdout, &stderr)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	issue.Status = relay.IssueStatusInterrupted
+	issue.LastError = "stopped before start"
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("save interrupted issue: %v", err)
+	}
+
+	select {
+	case exitCode := <-done:
+		if exitCode != 2 {
+			t.Fatalf("expected watch to exit 2, got %d", exitCode)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("watch did not complete")
+	}
+
+	for _, want := range []string{
+		"has no recorded execution yet",
+		"relay serve --once -state-dir " + stateDir,
+		"relay serve -state-dir " + stateDir,
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected watch reminder %q, got stderr=%s stdout=%s", want, stderr.String(), stdout.String())
+		}
+	}
+}
+
 func savePipelineForTest(t *testing.T, stateDir string, pipeline relay.Pipeline) {
 	t.Helper()
 	store := relay.NewStore(stateDir)

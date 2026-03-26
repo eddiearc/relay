@@ -55,6 +55,7 @@ func runPipelineShow(args []string, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "- plan_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.PlanPrompt, 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "- coding_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.CodingPrompt, 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "\nyaml:\n%s", string(data))
+	writePipelineShowHints(stderr, pipeline.Name, *stateDir)
 	return 0
 }
 
@@ -121,6 +122,7 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 	var eventOffset int64
 	var progressSnapshot string
 	var latestRunSummary string
+	var startHintShown bool
 
 	for {
 		issue, err := store.LoadIssue(*issueID)
@@ -150,6 +152,11 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 
+		if !startHintShown && issue.Status == relay.IssueStatusTodo && issue.CurrentLoop == 0 && issue.ActivePhase == "" && progressSnapshot == "" && eventOffset == 0 && !hasNonEmptyFile(eventsPath) {
+			writeWatchStartHint(stderr, issue.ID, *stateDir)
+			startHintShown = true
+		}
+
 		if relay.IsIssueTerminalStatus(issue.Status) {
 			if summary := summarizeLatestRunFailure(store, issue.ID); summary != "" && summary != latestRunSummary {
 				latestRunSummary = summary
@@ -170,6 +177,14 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 
 		time.Sleep(*pollInterval)
 	}
+}
+
+func hasNonEmptyFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Size() > 0
 }
 
 func summarizeProgressFile(artifactDir string) string {

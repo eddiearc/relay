@@ -661,6 +661,7 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
 	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
 
+	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := run([]string{
 		"pipeline", "add",
@@ -671,7 +672,7 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 		"--coding-prompt-file", codingPrompt,
 		"-state-dir", stateDir,
 		"demo",
-	}, io.Discard, &stderr)
+	}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
 	}
@@ -684,6 +685,14 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte("agent_runner: claude")) {
 		t.Fatalf("expected agent_runner in saved pipeline, got %s", string(data))
+	}
+	for _, want := range []string{
+		"relay pipeline show demo",
+		"relay issue add --pipeline demo",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected pipeline add hint %q, got stderr=%s stdout=%s", want, stderr.String(), stdout.String())
+		}
 	}
 }
 
@@ -782,6 +791,122 @@ func TestIssueAddCreatesPerIssueDirectory(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"agent_runner": "claude"`)) {
 		t.Fatalf("expected agent_runner in output, got %s", stdout.String())
+	}
+	for _, want := range []string{
+		"relay serve --once -state-dir " + stateDir,
+		"relay serve -state-dir " + stateDir,
+		"relay watch -issue issue-add -state-dir " + stateDir,
+		"relay status -issue issue-add -state-dir " + stateDir,
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected issue add hint %q, got %s", want, stderr.String())
+		}
+	}
+}
+
+func TestPipelineShowPrintsNextStepHints(t *testing.T) {
+	stateDir := t.TempDir()
+	savePipelineForTest(t, stateDir, relay.Pipeline{
+		Name:         "demo-show-hint",
+		InitCommand:  "git clone --depth 1 https://github.com/example/repo .",
+		LoopNum:      15,
+		PlanPrompt:   "Read the repository before planning.",
+		CodingPrompt: "Verify progress with real commands.",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "show", "-state-dir", stateDir, "demo-show-hint"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	for _, want := range []string{
+		"relay issue add --pipeline demo-show-hint",
+		"relay pipeline edit demo-show-hint",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected pipeline show hint %q, got stderr=%s stdout=%s", want, stderr.String(), stdout.String())
+		}
+	}
+}
+
+func TestPipelineListSuggestsHowToContinue(t *testing.T) {
+	stateDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "list", "-state-dir", stateDir}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	for _, want := range []string{
+		"relay pipeline template > pipeline.yaml",
+		"relay pipeline add <name>",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected empty pipeline list hint %q, got %s", want, stderr.String())
+		}
+	}
+
+	savePipelineForTest(t, stateDir, relay.Pipeline{
+		Name:         "demo-list",
+		InitCommand:  "git init repo",
+		LoopNum:      2,
+		PlanPrompt:   "plan",
+		CodingPrompt: "code",
+	})
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run([]string{"pipeline", "list", "-state-dir", stateDir}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "relay pipeline show demo-list") {
+		t.Fatalf("expected pipeline list hint to inspect first pipeline, got %s", stderr.String())
+	}
+}
+
+func TestServeOncePrintsWatchHintForRunningIssue(t *testing.T) {
+	stateDir := t.TempDir()
+	savePipelineForTest(t, stateDir, relay.Pipeline{
+		Name: "demo-serve-hint",
+		InitCommand: "mkdir repo && cd repo && git init && git config user.email relay@example.com && git config user.name relay && " +
+			"printf 'init\\n' > README.md && git add README.md && git commit -m init",
+		LoopNum:      1,
+		PlanPrompt:   "plan",
+		CodingPrompt: "code",
+	})
+	saveIssueSnapshot(t, stateDir, relay.Issue{
+		ID:           "issue-serve-hint",
+		PipelineName: "demo-serve-hint",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusTodo,
+	})
+
+	restore := SetServeRunnerForTesting(func(name string) (relay.AgentRunner, error) {
+		return scriptedServeRunner{t: t}, nil
+	})
+	t.Cleanup(restore)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"serve", "--once", "-state-dir", stateDir}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	for _, want := range []string{
+		"running issue issue-serve-hint",
+		"relay watch -issue issue-serve-hint -state-dir " + stateDir,
+		"relay status -issue issue-serve-hint -state-dir " + stateDir,
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected serve hint %q, got stderr=%s stdout=%s", want, stderr.String(), stdout.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), `"status": "done"`) {
+		t.Fatalf("expected serve output to include completed issue JSON, got %s", stdout.String())
 	}
 }
 
@@ -961,7 +1086,7 @@ func TestProcessTodoIssuesResolvesAgentRunnerOrder(t *testing.T) {
 	t.Cleanup(restore)
 
 	orchestrator := relay.NewOrchestrator(store, testShellRunner{}, nil)
-	processed, failed := processTodoIssues(context.Background(), orchestrator, store, io.Discard, io.Discard)
+	processed, failed := processTodoIssues(context.Background(), orchestrator, store, stateDir, io.Discard, io.Discard)
 	if !processed {
 		t.Fatal("expected todo issues to be processed")
 	}
@@ -1021,7 +1146,7 @@ func TestProcessTodoIssuesReportsMissingRunnerBinary(t *testing.T) {
 
 	orchestrator := relay.NewOrchestrator(store, testShellRunner{}, nil)
 	var stderr bytes.Buffer
-	processed, failed := processTodoIssues(context.Background(), orchestrator, store, io.Discard, &stderr)
+	processed, failed := processTodoIssues(context.Background(), orchestrator, store, stateDir, io.Discard, &stderr)
 	if !processed {
 		t.Fatal("expected todo issue to be processed")
 	}
@@ -1283,6 +1408,73 @@ func saveIssueSnapshot(t *testing.T, stateDir string, issue relay.Issue) {
 	}
 	if err := store.SaveIssue(issue); err != nil {
 		t.Fatalf("save issue: %v", err)
+	}
+}
+
+type scriptedServeRunner struct {
+	t *testing.T
+}
+
+func (r scriptedServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (relay.AgentRunResult, error) {
+	r.t.Helper()
+	featureListPath := mustPromptPathValue(r.t, req.Prompt, "FEATURE_LIST_PATH=")
+	progressPath := mustPromptPathValue(r.t, req.Prompt, "PROGRESS_PATH=")
+
+	switch req.Phase {
+	case "plan":
+		writeFeatureListJSON(r.t, featureListPath, `[{"id":"feature-1","title":"Feature","description":"desc","priority":1,"passes":false,"notes":""}]`)
+		writeProgressEntries(r.t, progressPath, "planned initial features")
+	case "coding":
+		writeFeatureListJSON(r.t, featureListPath, `[{"id":"feature-1","title":"Feature","description":"desc","priority":1,"passes":true,"notes":"verified"}]`)
+		appendProgressEntry(r.t, progressPath, "implemented and verified feature-1")
+	default:
+		r.t.Fatalf("unexpected phase %q", req.Phase)
+	}
+
+	return relay.AgentRunResult{Stdout: "ok", FinalMessage: "done"}, nil
+}
+
+func mustPromptPathValue(t *testing.T, prompt, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(prompt, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	t.Fatalf("missing %s in prompt", prefix)
+	return ""
+}
+
+func writeFeatureListJSON(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir feature list dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write feature list: %v", err)
+	}
+}
+
+func writeProgressEntries(t *testing.T, path string, entries ...string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir progress dir: %v", err)
+	}
+	data := strings.Join(entries, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write progress: %v", err)
+	}
+}
+
+func appendProgressEntry(t *testing.T, path, entry string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open progress: %v", err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(entry + "\n"); err != nil {
+		t.Fatalf("append progress: %v", err)
 	}
 }
 
