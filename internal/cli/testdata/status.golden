@@ -1,0 +1,4 @@
+issue=issue-status status=running loop=2 workdir=<STATE_DIR>/workspace/repo/app workspace=<STATE_DIR>/workspace/repo artifact=<STATE_DIR>/issues/issue-status
+active_phase=coding active_pids=[111 222]
+interrupt_requested=true
+last_error=retrying status snapshot

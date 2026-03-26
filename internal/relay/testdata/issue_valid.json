@@ -1,0 +1,14 @@
+{
+  "id": "issue-fixture",
+  "pipeline_name": "demo",
+  "goal": "Ship phase 2 coverage.",
+  "description": "Persisted issue snapshot used by CLI status and report.",
+  "status": "running",
+  "current_loop": 2,
+  "workspace_path": "/tmp/workspace",
+  "workdir_path": "/tmp/workspace/repo",
+  "active_phase": "coding",
+  "active_pids": [1234],
+  "last_error": "",
+  "interrupt_requested": true
+}

@@ -1,0 +1,8 @@
+{
+  "id": "issue-invalid-runner",
+  "pipeline_name": "demo",
+  "goal": "Ship phase 2 coverage.",
+  "description": "Invalid runner should fail.",
+  "status": "running",
+  "agent_runner": "cursor"
+}

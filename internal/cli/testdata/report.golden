@@ -1,0 +1,24 @@
+{
+  "id": "issue-report",
+  "pipeline_name": "demo-report",
+  "goal": "render report",
+  "description": "Capture a stable report output.",
+  "status": "done",
+  "current_loop": 3,
+  "artifact_dir": "<STATE_DIR>/issues/issue-report",
+  "workspace_path": "<STATE_DIR>/workspace/repo",
+  "workdir_path": "<STATE_DIR>/workspace/repo/app",
+  "active_phase": "",
+  "active_pids": null,
+  "last_error": "",
+  "interrupt_requested": false
+}
+
+artifacts:
+- <STATE_DIR>/issues/issue-report/feature_list.json
+- <STATE_DIR>/issues/issue-report/progress.txt
+- <STATE_DIR>/issues/issue-report/events.log
+
+logs:
+- <STATE_DIR>/issues/issue-report/runs/coding-loop-01.stderr.log
+- <STATE_DIR>/issues/issue-report/runs/coding-loop-01.stdout.log

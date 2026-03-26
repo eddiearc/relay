@@ -1,0 +1,6 @@
+{
+  "id": "issue-missing-goal",
+  "pipeline_name": "demo",
+  "description": "Missing goal should fail.",
+  "status": "running"
+}
