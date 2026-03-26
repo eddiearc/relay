@@ -264,6 +264,7 @@ func (f *fakeEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 	}
 	switch req.Phase {
 	case "plan":
+		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "ok", "", "planned")
 		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "FEATURE_LIST_PATH="))
 		writeFeatureList(tHelper{f.t}, artifactDir, []relay.FeatureItem{
 			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: false},
@@ -275,6 +276,7 @@ func (f *fakeEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 		if f.coding != 1 {
 			f.t.Fatalf("unexpected coding run %d", f.coding)
 		}
+		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "ok", "", "done")
 		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "FEATURE_LIST_PATH="))
 		writeFeatureList(tHelper{f.t}, artifactDir, []relay.FeatureItem{
 			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: true},
@@ -299,6 +301,7 @@ func (f *failingEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest
 	}
 	switch req.Phase {
 	case "plan":
+		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "ok", "", "planned")
 		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "FEATURE_LIST_PATH="))
 		writeFeatureList(tHelper{f.t}, artifactDir, []relay.FeatureItem{
 			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: false},
@@ -308,6 +311,7 @@ func (f *failingEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest
 		return relay.AgentRunResult{Stdout: "ok", FinalMessage: "planned"}, nil
 	case "coding":
 		f.coding++
+		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "attempted work", "synthetic coding failure\nmore detail", "")
 		return relay.AgentRunResult{
 			Stdout:   "attempted work",
 			Stderr:   "synthetic coding failure\nmore detail",
@@ -358,6 +362,27 @@ func appendProgress(t tHelper, artifactDir, text string) {
 	defer file.Close()
 	if _, err := file.WriteString(text + "\n"); err != nil {
 		t.Fatalf("append progress: %v", err)
+	}
+}
+
+func writeRunOutputs(t tHelper, logDir, loopID, stdout, stderr, finalMessage string) {
+	t.Helper()
+	if logDir == "" || loopID == "" {
+		return
+	}
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, loopID+".stdout.log"), []byte(stdout), 0o644); err != nil {
+		t.Fatalf("write stdout log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, loopID+".stderr.log"), []byte(stderr), 0o644); err != nil {
+		t.Fatalf("write stderr log: %v", err)
+	}
+	if finalMessage != "" {
+		if err := os.WriteFile(filepath.Join(logDir, loopID+".final.txt"), []byte(finalMessage), 0o644); err != nil {
+			t.Fatalf("write final message: %v", err)
+		}
 	}
 }
 
