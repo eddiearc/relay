@@ -168,7 +168,8 @@ Relay 的产品思路主要受这两篇文章启发：
 - `progress.txt` 是每轮之间的交接日志
 - `events.log`、`runs/` 和 `issue.json` 让失败和执行状态可追查
 
-Relay 当前默认通过本机 `codex` CLI 执行 agent。
+Relay 会按这个顺序解析本机 runner：issue 的 `agent_runner` 覆盖 → pipeline 的 `agent_runner` → 默认 `codex`。
+当前支持的本机 runner 是 `codex` 和 `claude`。
 
 ### 项目内置 Agent Skill
 
@@ -215,6 +216,7 @@ Relay 并不是对相关文章做简单复刻，而是把里面对 agent harness
 
 - `name`
 - `init_command`
+- `agent_runner`（可选：`codex` 或 `claude`；未设置时默认 `codex`）
 - `loop_num`（可选，默认值是 `20`）
 - `plan_prompt`
 - `coding_prompt`
@@ -231,6 +233,7 @@ Relay 并不是对相关文章做简单复刻，而是把里面对 agent harness
 
 - `id`
 - `pipeline_name`
+- `agent_runner`（可选覆盖；不填时继承 pipeline runner，再回退到 `codex`）
 - `goal`
 - `description`
 - `status`
@@ -304,7 +307,8 @@ npm install -g @eddiearc/relay
 前提：
 
 - macOS 或 Linux
-- 本机已安装 `codex`，并且在 `PATH` 里
+- 本机已安装 `codex` 或 `claude`，并且在 `PATH` 里
+- 如果 issue 和 pipeline 都没有设置 `agent_runner`，Relay 会默认使用 `codex`
 
 如果你更偏向源码安装：
 
@@ -317,8 +321,9 @@ go install github.com/eddiearc/relay/cmd/relay@latest
 具体示例和流程说明优先看 `relay help` 和 `relay help <command>`。
 
 - `relay pipeline add <name> --init-command ... --plan-prompt-file ... --coding-prompt-file ...`
-- `relay pipeline edit <name> [--init-command ...] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
+- `relay pipeline edit <name> [--init-command ...] [--agent-runner codex|claude] [--loop-num ...] [--plan-prompt-file ...] [--coding-prompt-file ...]`
 - `relay pipeline import -file pipeline.yaml`
+- `relay issue add --pipeline <name> [--agent-runner codex|claude] --goal ... --description ...`
 - `relay pipeline list`
 - `relay pipeline delete <name>`
 - `relay issue add --pipeline ... --goal ... --description ...`

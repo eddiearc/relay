@@ -159,6 +159,7 @@ func TestPipelineShowPrintsSummaryAndYAML(t *testing.T) {
 	savePipelineForTest(t, stateDir, relay.Pipeline{
 		Name:         "demo-show",
 		InitCommand:  "git clone --depth 1 https://github.com/example/repo .",
+		AgentRunner:  relay.AgentRunnerClaude,
 		LoopNum:      15,
 		PlanPrompt:   "Read the repository before planning.\nBreak the goal into verifiable features.\nEach feature must have observable acceptance conditions.",
 		CodingPrompt: "Stay on the task branch.\nVerify progress with real commands where possible.\nUpdate FEATURE_LIST_PATH based on verified state.",
@@ -174,9 +175,11 @@ func TestPipelineShowPrintsSummaryAndYAML(t *testing.T) {
 	for _, want := range []string{
 		"summary:",
 		"- init_strategy: git clone --depth 1 https://github.com/example/repo .",
+		"- agent_runner: claude",
 		"- loop_limit: 15",
 		"yaml:",
 		"name: demo-show",
+		"agent_runner: claude",
 		"coding_prompt:",
 	} {
 		if !strings.Contains(output, want) {

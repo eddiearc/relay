@@ -103,6 +103,9 @@ func TestPipelineHelp(t *testing.T) {
 		"relay pipeline template",
 		"relay help pipeline <subcommand>",
 		"repo-level E2E, integration, or CLI end-to-end checks",
+		"agent_runner",
+		"codex",
+		"claude",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected pipeline help output to contain %q, got %s", want, output)
@@ -129,6 +132,7 @@ func TestPipelineAddHelpMatchesDetailedUsage(t *testing.T) {
 	for _, want := range []string{
 		"create a pipeline from flags and prompt files",
 		"--init-command",
+		"--agent-runner",
 		"--plan-prompt-file",
 		"--coding-prompt-file",
 		"frontend pipelines should usually preserve browser-driven E2E",
@@ -163,6 +167,7 @@ func TestPipelineTemplateHelp(t *testing.T) {
 		"relay pipeline template > pipeline.yaml",
 		"Template:",
 		"name: repo-name",
+		"agent_runner:",
 		"coding_prompt:",
 	} {
 		if !strings.Contains(output, want) {
@@ -182,6 +187,7 @@ func TestPipelineTemplateCommandPrintsTemplate(t *testing.T) {
 	for _, want := range []string{
 		"name: repo-name",
 		"init_command:",
+		"agent_runner:",
 		"plan_prompt:",
 		"coding_prompt:",
 		"Ensure the branch has an open pull request",
@@ -209,6 +215,9 @@ func TestIssueHelp(t *testing.T) {
 		"relay issue template",
 		"relay help issue <subcommand>",
 		"treat missing repo-level verification as a harness gap",
+		"agent_runner",
+		"codex",
+		"claude",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected issue help output to contain %q, got %s", want, output)
@@ -229,6 +238,7 @@ func TestIssueAddHelpMatchesDetailedUsage(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"create an issue from flags",
+		"--agent-runner",
 		"--pipeline",
 		"--goal",
 		"--description",
@@ -255,6 +265,7 @@ func TestIssueTemplateHelp(t *testing.T) {
 		"relay issue template > issue.json",
 		"Template:",
 		"\"pipeline_name\": \"repo-name\"",
+		"\"agent_runner\": \"\"",
 		"\"description\": \"Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning.\"",
 	} {
 		if !strings.Contains(output, want) {
@@ -273,6 +284,7 @@ func TestIssueTemplateCommandPrintsTemplate(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"\"pipeline_name\": \"repo-name\"",
+		"\"agent_runner\": \"\"",
 		"\"goal\": \"Describe the end state in one sentence.\"",
 		"\"description\": \"Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning.\"",
 	} {
@@ -294,6 +306,8 @@ func TestServeHelp(t *testing.T) {
 		"start the polling orchestrator",
 		"--once",
 		"--poll-interval",
+		"codex",
+		"claude",
 		"Recommended startup sequence:",
 		"Diagnostic workflow:",
 	} {
@@ -652,6 +666,7 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	exitCode := run([]string{
 		"pipeline", "add",
 		"--init-command", "git init repo",
+		"--agent-runner", "claude",
 		"--loop-num", "2",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
@@ -663,6 +678,13 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "pipelines", "demo.yaml")); err != nil {
 		t.Fatalf("expected yaml pipeline file to be saved: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "pipelines", "demo.yaml"))
+	if err != nil {
+		t.Fatalf("read pipeline: %v", err)
+	}
+	if !bytes.Contains(data, []byte("agent_runner: claude")) {
+		t.Fatalf("expected agent_runner in saved pipeline, got %s", string(data))
 	}
 	for _, want := range []string{
 		"relay pipeline show demo",
@@ -679,6 +701,7 @@ func TestPipelineImportSavesYAMLPipeline(t *testing.T) {
 	pipelineFile := writeTempFile(t, "pipeline.yaml", ""+
 		"name: demo-import\n"+
 		"init_command: git init repo\n"+
+		"agent_runner: claude\n"+
 		"loop_num: 2\n"+
 		"plan_prompt: plan {{issue}}\n"+
 		"coding_prompt: code {{issue}}\n")
@@ -693,6 +716,55 @@ func TestPipelineImportSavesYAMLPipeline(t *testing.T) {
 	}
 }
 
+func TestPipelineAddRejectsInvalidAgentRunner(t *testing.T) {
+	stateDir := t.TempDir()
+	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
+	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
+
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"pipeline", "add",
+		"--init-command", "git init repo",
+		"--agent-runner", "cursor",
+		"--loop-num", "2",
+		"--plan-prompt-file", planPrompt,
+		"--coding-prompt-file", codingPrompt,
+		"-state-dir", stateDir,
+		"demo-invalid",
+	}, io.Discard, &stderr)
+	if exitCode == 0 {
+		t.Fatal("expected invalid pipeline agent_runner to fail")
+	}
+	if !strings.Contains(stderr.String(), "pipeline.agent_runner") {
+		t.Fatalf("expected pipeline.agent_runner error, got %s", stderr.String())
+	}
+}
+
+func TestPipelineEditUpdatesAgentRunner(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-edit-runner")
+
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"pipeline", "edit",
+		"--agent-runner", "claude",
+		"-state-dir", stateDir,
+		"demo-edit-runner",
+	}, io.Discard, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("pipeline edit failed: %s", stderr.String())
+	}
+
+	store := relay.NewStore(stateDir)
+	pipeline, err := store.LoadPipeline("demo-edit-runner")
+	if err != nil {
+		t.Fatalf("load pipeline: %v", err)
+	}
+	if pipeline.AgentRunner != relay.AgentRunnerClaude {
+		t.Fatalf("expected claude runner, got %q", pipeline.AgentRunner)
+	}
+}
+
 func TestIssueAddCreatesPerIssueDirectory(t *testing.T) {
 	stateDir := t.TempDir()
 	importTestPipeline(t, stateDir, "demo")
@@ -703,6 +775,7 @@ func TestIssueAddCreatesPerIssueDirectory(t *testing.T) {
 		"issue", "add",
 		"--id", "issue-add",
 		"--pipeline", "demo",
+		"--agent-runner", "claude",
 		"--goal", "ship feature",
 		"--description", "test issue",
 		"-state-dir", stateDir,
@@ -715,6 +788,9 @@ func TestIssueAddCreatesPerIssueDirectory(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"artifact_dir"`)) {
 		t.Fatalf("expected artifact dir in output, got %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"agent_runner": "claude"`)) {
+		t.Fatalf("expected agent_runner in output, got %s", stdout.String())
 	}
 	for _, want := range []string{
 		"relay serve --once -state-dir " + stateDir,
@@ -809,11 +885,10 @@ func TestServeOncePrintsWatchHintForRunningIssue(t *testing.T) {
 		Status:       relay.IssueStatusTodo,
 	})
 
-	previousRunner := newServeRunner
-	newServeRunner = func() relay.AgentRunner { return scriptedServeRunner{t: t} }
-	t.Cleanup(func() {
-		newServeRunner = previousRunner
+	restore := SetServeRunnerForTesting(func(name string) (relay.AgentRunner, error) {
+		return scriptedServeRunner{t: t}, nil
 	})
+	t.Cleanup(restore)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -842,6 +917,7 @@ func TestIssueImportCreatesPerIssueDirectory(t *testing.T) {
 	issueFile := writeTempFile(t, "issue.json", `{
   "id": "issue-import",
   "pipeline_name": "demo",
+  "agent_runner": "claude",
   "goal": "ship feature",
   "description": "test issue"
 }`)
@@ -853,6 +929,28 @@ func TestIssueImportCreatesPerIssueDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "issues", "issue-import", "issue.json")); err != nil {
 		t.Fatalf("expected issue.json to be created: %v", err)
+	}
+}
+
+func TestIssueAddRejectsInvalidAgentRunner(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-invalid-issue-runner")
+
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"issue", "add",
+		"--id", "issue-invalid",
+		"--pipeline", "demo-invalid-issue-runner",
+		"--agent-runner", "cursor",
+		"--goal", "ship feature",
+		"--description", "test issue",
+		"-state-dir", stateDir,
+	}, io.Discard, &stderr)
+	if exitCode == 0 {
+		t.Fatal("expected invalid issue agent_runner to fail")
+	}
+	if !strings.Contains(stderr.String(), "issue.agent_runner") {
+		t.Fatalf("expected issue.agent_runner error, got %s", stderr.String())
 	}
 }
 
@@ -884,6 +982,187 @@ func TestIssueEditAllowsRunningIssue(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"goal": "new goal"`)) {
 		t.Fatalf("expected updated goal, got %s", stdout.String())
+	}
+}
+
+func TestIssueEditUpdatesAgentRunner(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-issue-runner-edit")
+	saveIssueSnapshot(t, stateDir, relay.Issue{
+		ID:           "issue-runner-edit",
+		PipelineName: "demo-issue-runner-edit",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusTodo,
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"issue", "edit",
+		"--id", "issue-runner-edit",
+		"--agent-runner", "claude",
+		"-state-dir", stateDir,
+	}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("issue edit failed: %s", stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"agent_runner": "claude"`)) {
+		t.Fatalf("expected updated agent_runner, got %s", stdout.String())
+	}
+}
+
+func TestProcessTodoIssuesResolvesAgentRunnerOrder(t *testing.T) {
+	stateDir := t.TempDir()
+	store := relay.NewStore(stateDir)
+	store.WorkspaceRoot = filepath.Join(stateDir, "workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("ensure store: %v", err)
+	}
+
+	for _, pipeline := range []relay.Pipeline{
+		{
+			Name:         "pipe-default",
+			InitCommand:  "noop",
+			LoopNum:      1,
+			PlanPrompt:   "plan",
+			CodingPrompt: "code",
+		},
+		{
+			Name:         "pipe-claude",
+			InitCommand:  "noop",
+			LoopNum:      1,
+			PlanPrompt:   "plan",
+			CodingPrompt: "code",
+			AgentRunner:  relay.AgentRunnerClaude,
+		},
+		{
+			Name:         "pipe-codex",
+			InitCommand:  "noop",
+			LoopNum:      1,
+			PlanPrompt:   "plan",
+			CodingPrompt: "code",
+			AgentRunner:  relay.AgentRunnerCodex,
+		},
+	} {
+		if err := store.SavePipeline(pipeline); err != nil {
+			t.Fatalf("save pipeline %s: %v", pipeline.Name, err)
+		}
+	}
+	for _, issue := range []relay.Issue{
+		{
+			ID:           "issue-default",
+			PipelineName: "pipe-default",
+			Goal:         "goal",
+			Description:  "desc",
+			Status:       relay.IssueStatusTodo,
+		},
+		{
+			ID:           "issue-pipeline",
+			PipelineName: "pipe-claude",
+			Goal:         "goal",
+			Description:  "desc",
+			Status:       relay.IssueStatusTodo,
+		},
+		{
+			ID:           "issue-override",
+			PipelineName: "pipe-codex",
+			Goal:         "goal",
+			Description:  "desc",
+			Status:       relay.IssueStatusTodo,
+			AgentRunner:  relay.AgentRunnerClaude,
+		},
+	} {
+		if err := store.SaveIssue(issue); err != nil {
+			t.Fatalf("save issue %s: %v", issue.ID, err)
+		}
+	}
+
+	var runnerNames []string
+	restore := SetServeRunnerForTesting(func(name string) (relay.AgentRunner, error) {
+		runnerNames = append(runnerNames, name)
+		return &testServeRunner{t: t, store: store}, nil
+	})
+	t.Cleanup(restore)
+
+	orchestrator := relay.NewOrchestrator(store, testShellRunner{}, nil)
+	processed, failed := processTodoIssues(context.Background(), orchestrator, store, stateDir, io.Discard, io.Discard)
+	if !processed {
+		t.Fatal("expected todo issues to be processed")
+	}
+	if failed {
+		t.Fatal("expected processTodoIssues to succeed")
+	}
+	want := []string{"codex", "claude", "claude"}
+	if strings.Join(runnerNames, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected runner order %v, got %v", want, runnerNames)
+	}
+	for _, issueID := range []string{"issue-default", "issue-pipeline", "issue-override"} {
+		issue := loadIssueSnapshot(t, stateDir, issueID)
+		if issue.Status != relay.IssueStatusDone {
+			t.Fatalf("expected %s done, got %q", issueID, issue.Status)
+		}
+	}
+}
+
+func TestProcessTodoIssuesReportsMissingRunnerBinary(t *testing.T) {
+	stateDir := t.TempDir()
+	store := relay.NewStore(stateDir)
+	store.WorkspaceRoot = filepath.Join(stateDir, "workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("ensure store: %v", err)
+	}
+	if err := store.SavePipeline(relay.Pipeline{
+		Name:         "pipe-claude-missing",
+		InitCommand:  "noop",
+		LoopNum:      1,
+		PlanPrompt:   "plan",
+		CodingPrompt: "code",
+		AgentRunner:  relay.AgentRunnerClaude,
+	}); err != nil {
+		t.Fatalf("save pipeline: %v", err)
+	}
+	if err := store.SaveIssue(relay.Issue{
+		ID:           "issue-claude-missing",
+		PipelineName: "pipe-claude-missing",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusTodo,
+	}); err != nil {
+		t.Fatalf("save issue: %v", err)
+	}
+
+	restore := SetServeRunnerForTesting(func(name string) (relay.AgentRunner, error) {
+		if name != relay.AgentRunnerClaude {
+			t.Fatalf("expected claude runner, got %q", name)
+		}
+		return relay.ClaudeRunner{
+			LookPath: func(string) (string, error) {
+				return "", errors.New("not found")
+			},
+		}, nil
+	})
+	t.Cleanup(restore)
+
+	orchestrator := relay.NewOrchestrator(store, testShellRunner{}, nil)
+	var stderr bytes.Buffer
+	processed, failed := processTodoIssues(context.Background(), orchestrator, store, stateDir, io.Discard, &stderr)
+	if !processed {
+		t.Fatal("expected todo issue to be processed")
+	}
+	if !failed {
+		t.Fatal("expected processTodoIssues to report failure")
+	}
+
+	issue := loadIssueSnapshot(t, stateDir, "issue-claude-missing")
+	if issue.Status != relay.IssueStatusFailed {
+		t.Fatalf("expected failed issue, got %q", issue.Status)
+	}
+	if !strings.Contains(issue.LastError, "claude CLI not found") {
+		t.Fatalf("expected missing claude error, got %q", issue.LastError)
+	}
+	if !strings.Contains(stderr.String(), "claude CLI not found") {
+		t.Fatalf("expected stderr to mention missing claude CLI, got %s", stderr.String())
 	}
 }
 
@@ -1216,4 +1495,56 @@ func writeTempFile(t *testing.T, name, content string) string {
 		t.Fatalf("write %s: %v", name, err)
 	}
 	return path
+}
+
+type testShellRunner struct{}
+
+func (testShellRunner) Run(_ context.Context, req relay.ShellRunRequest) (relay.CommandResult, error) {
+	if req.OnStart != nil {
+		req.OnStart(4242)
+	}
+	return relay.CommandResult{
+		ExitCode: 0,
+		FinalDir: req.Workdir,
+	}, nil
+}
+
+type testServeRunner struct {
+	t     *testing.T
+	store *relay.Store
+}
+
+func (r *testServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (relay.AgentRunResult, error) {
+	r.t.Helper()
+
+	artifactDir := r.store.IssueDir(req.IssueID)
+	featureListPath := relay.FeatureListPath(artifactDir)
+	progressPath := relay.ProgressPath(artifactDir)
+
+	switch req.Phase {
+	case "plan":
+		if err := os.WriteFile(featureListPath, []byte(`[{"id":"feature-1","title":"demo","description":"demo","priority":1,"passes":false,"notes":""}]`), 0o644); err != nil {
+			r.t.Fatalf("write feature_list.json: %v", err)
+		}
+		if err := os.WriteFile(progressPath, []byte("planning complete\n"), 0o644); err != nil {
+			r.t.Fatalf("write progress.txt: %v", err)
+		}
+	case "coding":
+		if err := os.WriteFile(featureListPath, []byte(`[{"id":"feature-1","title":"demo","description":"demo","priority":1,"passes":true,"notes":""}]`), 0o644); err != nil {
+			r.t.Fatalf("write feature_list.json: %v", err)
+		}
+		file, err := os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			r.t.Fatalf("open progress.txt: %v", err)
+		}
+		if _, err := file.WriteString("loop 1 complete\n"); err != nil {
+			_ = file.Close()
+			r.t.Fatalf("append progress.txt: %v", err)
+		}
+		if err := file.Close(); err != nil {
+			r.t.Fatalf("close progress.txt: %v", err)
+		}
+	}
+
+	return relay.AgentRunResult{Stdout: req.Phase + "-ok"}, nil
 }

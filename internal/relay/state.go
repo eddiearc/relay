@@ -81,6 +81,9 @@ func (s *Store) PipelinePath(name string) string {
 
 func (s *Store) SaveIssue(issue Issue) error {
 	issue.ArtifactDir = s.IssueDir(issue.ID)
+	if err := issue.ValidatePersisted(); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(issue, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal issue: %w", err)
@@ -110,6 +113,9 @@ func (s *Store) LoadIssue(issueID string) (Issue, error) {
 	}
 	if issue.WorkdirPath == "" {
 		issue.WorkdirPath = payload.LegacyRepoPath
+	}
+	if err := issue.ValidatePersisted(); err != nil {
+		return issue, err
 	}
 	return issue, nil
 }

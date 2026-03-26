@@ -106,7 +106,8 @@ What it does:
   - loads persisted pipelines and issues from the Relay state directory
   - recovers orphaned active issues
   - polls for todo issues
-  - runs planning once, then coding loops until completion or failure
+  - resolves agent_runner as issue override -> pipeline setting -> default codex
+  - runs planning once, then coding loops until completion or failure with the resolved local runner
 
 Recommended startup sequence:
   1. relay serve --once
@@ -118,6 +119,11 @@ Mode selection:
   - foreground validation: relay serve
   - lightweight background process: nohup relay serve >> ~/.relay/logs/serve.log 2>&1 &
   - production-style supervision: launchd, systemd, or another service manager
+
+Runner requirements:
+  - supported values are codex and claude
+  - if neither issue nor pipeline config sets agent_runner, Relay uses codex
+  - install the selected local CLI and keep it available in PATH
 
 Diagnostic workflow:
   - relay issue list
@@ -162,13 +168,14 @@ Before writing a pipeline, inspect:
   - which reusable test scripts, skills, or fixtures can be reused
   - whether the task needs browser interaction, service startup, or local binary execution for realistic verification
   - whether codegen, Docker, DB setup, env vars, or private registries are required
+  - which agent_runner should execute the task: codex, claude, or the default codex fallback
 
 Examples:
   relay pipeline template
   relay pipeline import -file pipeline.yaml
   relay pipeline show demo
-  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --plan-prompt-file plan.md --coding-prompt-file coding.md
-  relay pipeline edit demo --loop-num 15
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline edit demo --loop-num 15 --agent-runner codex
 `
 
 var pipelineAddUsage = `create a pipeline from flags and prompt files.
@@ -179,11 +186,13 @@ Usage:
 Required:
   <name>                 Saved pipeline name
   --init-command         Shell command that prepares a fresh issue workspace
+  --agent-runner         Optional runner override: "", codex, or claude
   --plan-prompt-file     Planner prompt template file
   --coding-prompt-file   Coding prompt template file
 
 Pipeline rules:
   - init_command should usually create a fresh workspace checkout
+  - agent_runner is optional; leave it empty to default to codex
   - prefer shallow clones unless the task needs history
   - plan_prompt should force verifiable features and branch setup before coding
   - coding_prompt should force evidence-based FEATURE_LIST_PATH updates and PROGRESS_PATH handoff entries
@@ -202,6 +211,7 @@ Pipeline rules:
 Examples:
   relay pipeline add demo \
     --init-command 'git clone --depth 1 https://github.com/owner/repo .' \
+    --agent-runner claude \
     --plan-prompt-file plan.md \
     --coding-prompt-file coding.md
 `
@@ -213,12 +223,14 @@ Usage:
 
 What can be changed:
   --init-command
+  --agent-runner
   --loop-num
   --plan-prompt-file
   --coding-prompt-file
 
 Examples:
   relay pipeline edit demo --loop-num 15
+  relay pipeline edit demo --agent-runner claude
   relay pipeline edit demo --coding-prompt-file coding-v2.md
 `
 
@@ -234,6 +246,7 @@ Required pipeline YAML fields:
   - coding_prompt
 
 Optional pipeline YAML fields:
+  - agent_runner (empty, codex, or claude; defaults to codex when omitted)
   - loop_num
 
 Use "relay pipeline template" to print a complete starting template.
@@ -249,6 +262,7 @@ Usage:
 
 What it prints:
   - init strategy summary
+  - effective agent runner
   - loop limit
   - key plan and coding constraints
   - full saved YAML
@@ -264,6 +278,7 @@ Usage:
 
 What it prints:
   - a full pipeline.yaml skeleton
+  - optional runner selection with codex defaulting
   - branch and PR guidance in the embedded prompts
   - default loop_num guidance suitable for real repository work
 
@@ -313,6 +328,7 @@ Typical flow:
   3. Inspect progress with "relay status" and "relay report".
 
 Issue writing rules:
+  - agent_runner is optional; when omitted, the issue inherits the pipeline runner and then codex by default
   - goal should describe the end state in one sentence
   - description should preserve scope, constraints, non-goals, and verification signals
   - acceptance criteria should come from observable commands, API behavior, UI behavior, files, or service events
@@ -322,7 +338,7 @@ Issue writing rules:
 
 Examples:
   relay issue template
-  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay issue add --pipeline demo --agent-runner claude --goal "Implement X" --description "Scope and verification."
   relay issue list
   relay issue interrupt --id issue-123
 `
@@ -336,6 +352,9 @@ Required:
   --pipeline      Existing pipeline name
   --goal          One-line end state
   --description   Scope, constraints, and verification details
+
+Optional:
+  --agent-runner  Optional runner override: "", codex, or claude
 
 Good description inputs include:
   - verification commands such as go test ./..., npm run build, or tsc --noEmit
@@ -357,6 +376,7 @@ feature_list.json rules for downstream planning:
 Examples:
   relay issue add \
     --pipeline demo \
+    --agent-runner claude \
     --goal "Add CLI summary output" \
     --description "Update the command output and verify with go test ./..."
 `
@@ -367,6 +387,7 @@ Usage:
   relay issue edit --id <issue-id> [flags]
 
 Examples:
+  relay issue edit --id issue-123 --agent-runner codex
   relay issue edit --id issue-123 --goal "Refine summary output"
   relay issue edit --id issue-123 --description "Updated scope and verification commands"
 `
@@ -388,6 +409,9 @@ var issueImportUsage = `import an issue from JSON.
 Usage:
   relay issue import -file <issue.json> [flags]
 
+Optional issue JSON fields:
+  - agent_runner (empty, codex, or claude; overrides the pipeline runner)
+
 Use "relay issue template" to print a complete starting template.
 
 Examples:
@@ -401,6 +425,7 @@ Usage:
 
 What it prints:
   - a full issue.json skeleton
+  - an optional runner override field
   - the expected shape for goal and description inputs
 
 Examples:
@@ -519,6 +544,7 @@ init_command: |
   if [ -f package.json ]; then
     npm run build --if-present
   fi
+agent_runner: ""
 loop_num: 15
 plan_prompt: |
   Read the repository before planning.
@@ -543,6 +569,7 @@ coding_prompt: |
 
 var issueTemplateJSON = `{
   "pipeline_name": "repo-name",
+  "agent_runner": "",
   "goal": "Describe the end state in one sentence.",
   "description": "Describe scope, constraints, validation commands, reusable verification assets, missing E2E or unit-test gaps, non-goals, and any known context that should shape feature planning."
 }
@@ -569,8 +596,23 @@ type upgradeCommand struct {
 	args []string
 }
 
-var newServeRunner = func() relay.AgentRunner {
-	return relay.CodexRunner{}
+type optionalStringFlag struct {
+	value string
+	set   bool
+}
+
+func (f *optionalStringFlag) String() string {
+	return f.value
+}
+
+func (f *optionalStringFlag) Set(value string) error {
+	f.value = value
+	f.set = true
+	return nil
+}
+
+var newServeRunner = func(name string) (relay.AgentRunner, error) {
+	return relay.NewAgentRunner(name)
 }
 
 var upgradeExecutable = os.Executable
@@ -648,7 +690,7 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 }
 
 // SetServeRunnerForTesting overrides the serve runner factory until the returned restore function is called.
-func SetServeRunnerForTesting(factory func() relay.AgentRunner) func() {
+func SetServeRunnerForTesting(factory func(string) (relay.AgentRunner, error)) func() {
 	previous := newServeRunner
 	newServeRunner = factory
 	return func() {
@@ -1010,7 +1052,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "prepare state dir: %v\n", err)
 		return 1
 	}
-	orchestrator := relay.NewOrchestrator(store, relay.ZshRunner{}, newServeRunner())
+	orchestrator := relay.NewOrchestrator(store, relay.ZshRunner{}, nil)
 	ctx := context.Background()
 	if recovered, err := recoverActiveIssues(store); err != nil {
 		_, _ = fmt.Fprintf(stderr, "recover active issues: %v\n", err)
@@ -1070,6 +1112,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	}
 	loopNum := fs.Int("loop-num", relay.DefaultLoopNum, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
+	agentRunner := fs.String("agent-runner", "", `optional agent runner override: "", codex, or claude`)
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
@@ -1096,6 +1139,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	pipeline := relay.Pipeline{
 		Name:         fs.Arg(0),
 		InitCommand:  *initCommand,
+		AgentRunner:  *agentRunner,
 		LoopNum:      *loopNum,
 		PlanPrompt:   string(planPrompt),
 		CodingPrompt: string(codingPrompt),
@@ -1127,6 +1171,8 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	}
 	loopNum := fs.Int("loop-num", 0, "maximum coding loop iterations")
 	initCommand := fs.String("init-command", "", "shell command used to initialize the workspace repository")
+	var agentRunner optionalStringFlag
+	fs.Var(&agentRunner, "agent-runner", `optional agent runner override: "", codex, or claude`)
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
@@ -1148,6 +1194,9 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	}
 	if *initCommand != "" {
 		pipeline.InitCommand = *initCommand
+	}
+	if agentRunner.set {
+		pipeline.AgentRunner = agentRunner.value
 	}
 	if *loopNum > 0 {
 		pipeline.LoopNum = *loopNum
@@ -1351,6 +1400,7 @@ func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 	}
 	id := fs.String("id", "", "optional issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
+	agentRunner := fs.String("agent-runner", "", `optional agent runner override: "", codex, or claude`)
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
@@ -1363,6 +1413,7 @@ func runIssueAdd(args []string, stdout, stderr io.Writer) int {
 	issue := relay.Issue{
 		ID:           *id,
 		PipelineName: *pipelineName,
+		AgentRunner:  *agentRunner,
 		Goal:         *goal,
 		Description:  *description,
 	}
@@ -1393,6 +1444,8 @@ func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 	}
 	id := fs.String("id", "", "issue id")
 	pipelineName := fs.String("pipeline", "", "pipeline name")
+	var agentRunner optionalStringFlag
+	fs.Var(&agentRunner, "agent-runner", `optional agent runner override: "", codex, or claude`)
 	goal := fs.String("goal", "", "issue goal")
 	description := fs.String("description", "", "issue description")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
@@ -1422,6 +1475,9 @@ func runIssueEdit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		issue.PipelineName = *pipelineName
+	}
+	if agentRunner.set {
+		issue.AgentRunner = agentRunner.value
 	}
 	if *goal != "" {
 		issue.Goal = *goal
@@ -1810,6 +1866,25 @@ func processTodoIssues(ctx context.Context, orchestrator *relay.Orchestrator, st
 			failed = true
 			continue
 		}
+		runnerName, err := relay.ResolveAgentRunner(issue.AgentRunner, pipeline.AgentRunner)
+		if err != nil {
+			issue.Status = relay.IssueStatusFailed
+			issue.LastError = err.Error()
+			_ = store.SaveIssue(issue)
+			_, _ = fmt.Fprintf(stderr, "issue %s failed: %s\n", issue.ID, issue.LastError)
+			failed = true
+			continue
+		}
+		runner, err := newServeRunner(runnerName)
+		if err != nil {
+			issue.Status = relay.IssueStatusFailed
+			issue.LastError = err.Error()
+			_ = store.SaveIssue(issue)
+			_, _ = fmt.Fprintf(stderr, "issue %s failed: %s\n", issue.ID, issue.LastError)
+			failed = true
+			continue
+		}
+		orchestrator.Runner = runner
 		updated, err := orchestrator.RunIssue(ctx, pipeline, issue)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "issue %s failed: %v\n", issue.ID, err)

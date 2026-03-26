@@ -100,4 +100,5 @@ Trusted publishing is now the primary path in CI. Token-based publishing is only
 ## Important Runtime Notes
 
 - Relay currently supports macOS and Linux only.
-- The installed CLI still requires `codex` to be available in `PATH`.
+- The installed CLI requires the selected local runner (`codex` or `claude`) to be available in `PATH`.
+- If neither the issue nor the pipeline sets `agent_runner`, Relay defaults to `codex`.

@@ -12,6 +12,10 @@ import (
 const (
 	DefaultLoopNum = 20
 
+	AgentRunnerCodex   = "codex"
+	AgentRunnerClaude  = "claude"
+	DefaultAgentRunner = AgentRunnerCodex
+
 	IssueStatusTodo        = "todo"
 	IssueStatusPlanning    = "planning"
 	IssueStatusRunning     = "running"
@@ -24,6 +28,7 @@ const (
 type Pipeline struct {
 	Name         string `json:"name" yaml:"name"`
 	InitCommand  string `json:"init_command" yaml:"init_command"`
+	AgentRunner  string `json:"agent_runner,omitempty" yaml:"agent_runner,omitempty"`
 	LoopNum      int    `json:"loop_num" yaml:"loop_num"`
 	PlanPrompt   string `json:"plan_prompt" yaml:"plan_prompt"`
 	CodingPrompt string `json:"coding_prompt" yaml:"coding_prompt"`
@@ -32,6 +37,7 @@ type Pipeline struct {
 type Issue struct {
 	ID                 string `json:"id"`
 	PipelineName       string `json:"pipeline_name"`
+	AgentRunner        string `json:"agent_runner,omitempty"`
 	Goal               string `json:"goal"`
 	Description        string `json:"description"`
 	Status             string `json:"status"`
@@ -80,6 +86,9 @@ func (p Pipeline) Validate() error {
 	if p.LoopNum <= 0 {
 		return fmt.Errorf("pipeline.loop_num must be positive, got %d", p.LoopNum)
 	}
+	if err := validateAgentRunner("pipeline.agent_runner", p.AgentRunner); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -94,6 +103,19 @@ func (i *Issue) Normalize() error {
 }
 
 func (i Issue) ValidateForCreate() error {
+	if err := i.ValidatePersisted(); err != nil {
+		return err
+	}
+	if i.Status == "" {
+		return errors.New("issue.status is required")
+	}
+	if i.Status != IssueStatusTodo {
+		return fmt.Errorf("issue.status must start as %q, got %q", IssueStatusTodo, i.Status)
+	}
+	return nil
+}
+
+func (i Issue) ValidatePersisted() error {
 	if i.ID == "" {
 		return errors.New("issue.id is required")
 	}
@@ -103,8 +125,8 @@ func (i Issue) ValidateForCreate() error {
 	if i.Goal == "" {
 		return errors.New("issue.goal is required")
 	}
-	if i.Status != IssueStatusTodo {
-		return fmt.Errorf("issue.status must start as %q, got %q", IssueStatusTodo, i.Status)
+	if err := validateAgentRunner("issue.agent_runner", i.AgentRunner); err != nil {
+		return err
 	}
 	return nil
 }
@@ -113,6 +135,7 @@ func (i Issue) TemplateJSON() string {
 	payload := struct {
 		ID                 string `json:"id"`
 		PipelineName       string `json:"pipeline_name"`
+		AgentRunner        string `json:"agent_runner"`
 		Goal               string `json:"goal"`
 		Description        string `json:"description"`
 		Status             string `json:"status"`
@@ -126,6 +149,7 @@ func (i Issue) TemplateJSON() string {
 	}{
 		ID:                 i.ID,
 		PipelineName:       i.PipelineName,
+		AgentRunner:        i.AgentRunner,
 		Goal:               i.Goal,
 		Description:        i.Description,
 		Status:             i.Status,
@@ -162,5 +186,14 @@ func IsIssueTerminalStatus(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func validateAgentRunner(field, value string) error {
+	switch value {
+	case "", AgentRunnerCodex, AgentRunnerClaude:
+		return nil
+	default:
+		return fmt.Errorf("%s must be empty, %q, or %q, got %q", field, AgentRunnerCodex, AgentRunnerClaude, value)
 	}
 }
