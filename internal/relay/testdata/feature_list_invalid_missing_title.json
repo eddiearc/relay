@@ -1,0 +1,10 @@
+[
+  {
+    "id": "verification-guide",
+    "title": "",
+    "description": "Document targeted and broad verification commands.",
+    "priority": 1,
+    "passes": false,
+    "notes": "Missing title should fail validation."
+  }
+]

@@ -1,0 +1,49 @@
+relay is a goal-driven supervisor CLI.
+
+Usage:
+  relay <command> [arguments]
+  relay help [command] [subcommand]
+
+Workflow:
+  1. relay help
+  2. relay version
+  3. relay upgrade --check
+  4. relay help pipeline
+  5. relay help issue
+  6. relay serve --once
+
+Examples:
+  relay help
+  relay version
+  relay upgrade --check
+  relay pipeline import -file pipeline.yaml
+  relay pipeline show demo
+  relay issue add --pipeline demo --goal "Implement X" --description "Scope and verification."
+  relay serve --once
+  relay watch -issue issue-123
+  relay status -issue issue-123
+  relay report -issue issue-123
+
+Commands:
+  serve    Start the polling orchestrator
+  watch    Follow one issue's persisted state and logs
+  pipeline Create, inspect, and print pipeline templates
+  issue    Create, inspect, and print issue templates
+  status   Show saved issue status
+  report   Print a saved issue report
+  kill     Mark a saved issue as failed
+  upgrade  Upgrade the relay CLI
+  version  Show build version information
+  help     Show detailed help for a command or subcommand
+
+More help:
+  relay help serve
+  relay help watch
+  relay help pipeline add
+  relay help pipeline show
+  relay help pipeline template
+  relay help issue add
+  relay help issue template
+
+Skill refresh:
+  npx skills add https://github.com/eddiearc/relay --skill relay-operator -g -y
