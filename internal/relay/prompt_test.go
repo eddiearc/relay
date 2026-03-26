@@ -94,6 +94,10 @@ func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 		"Do not use apply_patch with absolute paths",
 		"FEATURE_LIST_PATH must remain a JSON array",
 		"Do not change any feature passes value from true back to false",
+		"Default each coding loop to one main feature from FEATURE_LIST_PATH, or at most a very small cluster of tightly related tasks required to finish that feature safely",
+		"Before editing code, choose the verification path for that feature and keep implementation aligned with it",
+		"Prefer finishing one slice thoroughly instead of touching multiple planned features shallowly",
+		"When broader rollout work remains, keep those features explicit in FEATURE_LIST_PATH with passes=false and notes describing what is still missing",
 		"WORKDIR_PATH=/tmp/workspaces/issue-1/repo",
 		"runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning and coding runs for debugging",
 	} {
