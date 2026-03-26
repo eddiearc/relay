@@ -52,8 +52,8 @@ func runPipelineShow(args []string, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "- init_strategy: %s\n", summarizeBlock(pipeline.InitCommand))
 	_, _ = fmt.Fprintf(stdout, "- agent_runner: %s\n", summarizeAgentRunner(pipeline.AgentRunner))
 	_, _ = fmt.Fprintf(stdout, "- loop_limit: %d\n", pipeline.LoopNum)
-	_, _ = fmt.Fprintf(stdout, "- plan_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.PlanPrompt, 3), " | "))
-	_, _ = fmt.Fprintf(stdout, "- coding_constraints: %s\n", strings.Join(firstMeaningfulLines(pipeline.CodingPrompt, 3), " | "))
+	_, _ = fmt.Fprintf(stdout, "- plan_constraints: %s\n", strings.Join(summarizePromptConstraints(pipeline.PlanPrompt, "plan", 3), " | "))
+	_, _ = fmt.Fprintf(stdout, "- coding_constraints: %s\n", strings.Join(summarizePromptConstraints(pipeline.CodingPrompt, "coding", 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "\nyaml:\n%s", string(data))
 	writePipelineShowHints(stderr, pipeline.Name, *stateDir)
 	return 0
@@ -87,6 +87,60 @@ func firstMeaningfulLines(value string, limit int) []string {
 		if len(result) == limit {
 			break
 		}
+	}
+	return result
+}
+
+func summarizePromptConstraints(value, phase string, limit int) []string {
+	lines := meaningfulLines(value)
+	if len(lines) <= limit {
+		return lines
+	}
+
+	keywords := []string{"verification"}
+	switch phase {
+	case "plan":
+		keywords = append(keywords, "phase", "phased", "dependency", "dependencies", "rollout", "acceptance")
+	case "coding":
+		keywords = append(keywords, "one main feature", "tightly related", "unfinished", "feature_list", "passes=false", "cluster")
+	}
+
+	selected := make([]string, 0, limit)
+	used := make([]bool, len(lines))
+	for _, keyword := range keywords {
+		for index, line := range lines {
+			if used[index] || !strings.Contains(strings.ToLower(line), keyword) {
+				continue
+			}
+			selected = append(selected, line)
+			used[index] = true
+			if len(selected) == limit {
+				return selected
+			}
+		}
+	}
+
+	for index, line := range lines {
+		if used[index] {
+			continue
+		}
+		selected = append(selected, line)
+		if len(selected) == limit {
+			break
+		}
+	}
+	return selected
+}
+
+func meaningfulLines(value string) []string {
+	lines := strings.Split(value, "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
 	}
 	return result
 }
@@ -302,9 +356,9 @@ func summarizeLatestRunFailure(store *relay.Store, issueID string) string {
 
 // agentLogTracker tracks a live agent log file incrementally.
 type agentLogTracker struct {
-	path       string
-	offset     int64
-	lastLine   string
+	path        string
+	offset      int64
+	lastLine    string
 	seenInitial bool
 }
 

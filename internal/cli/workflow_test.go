@@ -198,6 +198,52 @@ func TestPipelineShowPrintsSummaryAndYAML(t *testing.T) {
 	}
 }
 
+func TestPipelineShowHighlightsPlanningAndCodingSplit(t *testing.T) {
+	stateDir := t.TempDir()
+	savePipelineForTest(t, stateDir, relay.Pipeline{
+		Name:        "demo-show-focus",
+		InitCommand: "git clone --depth 1 https://github.com/example/repo .",
+		LoopNum:     20,
+		PlanPrompt: strings.Join([]string{
+			"Understand the repository.",
+			"Read the issue details carefully.",
+			"Write concise notes.",
+			"Default to phased plans when the work is repo-wide or harness-level.",
+			"Capture rollout breadth, verification boundaries, and acceptance boundaries.",
+		}, "\n"),
+		CodingPrompt: strings.Join([]string{
+			"Stay on the task branch.",
+			"Keep commits reviewable.",
+			"Avoid unrelated refactors.",
+			"Default each coding loop to one main feature, or a very small tightly related cluster.",
+			"Choose the verification path before editing and keep unfinished rollout work explicit.",
+		}, "\n"),
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"pipeline", "show", "-state-dir", stateDir, "demo-show-focus"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"- plan_constraints:",
+		"Default to phased plans when the work is repo-wide or harness-level.",
+		"Capture rollout breadth, verification boundaries, and acceptance boundaries.",
+		"Understand the repository.",
+		"- coding_constraints:",
+		"Default each coding loop to one main feature, or a very small tightly related cluster.",
+		"Choose the verification path before editing and keep unfinished rollout work explicit.",
+		"Stay on the task branch.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected pipeline show output to contain %q, got %s", want, output)
+		}
+	}
+}
+
 func TestWatchReportsStateFlowAndCompletes(t *testing.T) {
 	stateDir := t.TempDir()
 	importTestPipeline(t, stateDir, "demo-watch")
