@@ -1,6 +1,16 @@
 # Relay Verification Strategy
 
-Relay should not rely on one verification style. This repository now uses a layered model so contributors can pick the smallest realistic proof while still preserving an end-to-end path before merge.
+Relay should not rely on one verification style. This repository uses a layered model so contributors can pick the smallest realistic proof during iteration, widen to repository-wide proof before handoff, and still finish with real CLI checks for stable user-visible behavior.
+
+## Default Proof Path
+
+For most Relay changes, use this order unless the task clearly justifies a stronger project-level path:
+
+1. targeted package tests for the layer you changed
+2. `go test ./...` before commit or PR update
+3. local CLI verification for the affected user-facing commands
+
+That default keeps iteration fast without skipping the final proof that the actual `relay` command still behaves as expected.
 
 ## Current Layers
 
@@ -13,28 +23,31 @@ Good fits in this repository:
 - `internal/relay/spec_test.go` for pipeline and issue normalization
 - `internal/relay/runner_test.go` for runner command construction and log handling
 - `internal/relay/feature_test.go` for `feature_list.json` validation and transition rules
+- `internal/relay/state_test.go` for persisted issue snapshot loading and contract checks
 - `internal/relay/orchestrator_test.go` for orchestration behavior with controlled test doubles
 
 Use this layer when you are checking:
 
 - normalization and validation logic
 - state transitions with in-memory or temp-dir setup
+- persisted artifact schema drift
 - pure formatting or helper behavior
 - failure modes that do not require a subprocess boundary
 
 Targeted commands:
 
 - `go test ./internal/relay -run TestLoadFeatureListFixtures`
+- `go test ./internal/relay -run TestStoreLoadIssueFixtures`
 - `go test ./internal/relay -run TestValidateFeatureTransitionRejectsDeletionAndRegression`
 
 ### 2. In-process CLI tests
 
-Use in-process CLI tests when the command surface matters, but a subprocess boundary adds little value. These tests call `run(...)` or `RunWithIO(...)` directly and are fast enough for iteration.
+Use in-process CLI tests when the command surface matters, but a subprocess boundary adds little value. These tests call `run(...)` or `RunWithIO(...)` directly and are fast enough for local iteration.
 
 Good fits in this repository:
 
 - command routing and usage text branches in `internal/cli/app_test.go`
-- hint text and report formatting
+- hint text and report formatting with temp Relay state
 - serve/watch flows that swap in test runners through `SetServeRunnerForTesting`
 
 Use this layer when you are checking:
@@ -57,19 +70,22 @@ Current coverage:
 - `internal/cli/golden_test.go`
 - `internal/cli/testdata/help.golden`
 - `internal/cli/testdata/help_pipeline.golden`
+- `internal/cli/testdata/status.golden`
+- `internal/cli/testdata/report.golden`
 
 This layer is the right fit for:
 
 - top-level `relay help`
 - stable subcommand help like `relay help pipeline`
-- other long, human-facing text output where review should show exact drift
+- reviewable `relay status` output against persisted issue state
+- reviewable `relay report` output that summarizes issue artifacts and logs
 
 Run and refresh:
 
-- verify: `go test ./internal/cli -run TestHelpOutputGolden`
-- refresh intentionally changed output: `go test ./internal/cli -run TestHelpOutputGolden -args -update`
+- verify: `go test ./internal/cli -run TestCommandOutputGolden`
+- refresh intentionally changed output: `go test ./internal/cli -run TestCommandOutputGolden -args -update`
 
-Do not use goldens for highly dynamic output, timestamps, or paths that churn every run.
+Do not use goldens for highly dynamic output, timestamps, or paths that churn every run unless the test normalizes them first.
 
 ### 4. Subprocess command integration tests
 
@@ -78,17 +94,18 @@ Use a real subprocess when the process boundary itself matters: exit code propag
 Current coverage:
 
 - `internal/cli/subprocess_test.go` runs `go run ./cmd/relay`
-- the covered path imports a pipeline and then runs `relay issue add` against a temporary state directory
+- covered flows import a pipeline, create an issue, and then read that issue back through `relay status`
 
 This layer is the right fit for:
 
 - commands that create or mutate persisted state on disk
 - smoke checks for the real compiled or `go run` CLI surface
 - output split across stdout and stderr
+- stable command flows that should survive package-level refactors
 
-Targeted command:
+Targeted commands:
 
-- `go test ./internal/cli -run TestRelaySubprocessIssueAddCreatesArtifacts`
+- `go test ./internal/cli -run TestRelaySubprocess`
 
 ### 5. Contract fixtures for persisted machine-consumed artifacts
 
@@ -98,7 +115,9 @@ Current coverage:
 
 - `internal/relay/testdata/feature_list_valid.json`
 - `internal/relay/testdata/feature_list_invalid_missing_title.json`
-- `internal/relay/feature_test.go` loading fixtures through `LoadFeatureList`
+- `internal/relay/testdata/issue_valid.json`
+- `internal/relay/testdata/issue_invalid_missing_goal.json`
+- `internal/relay/testdata/issue_invalid_agent_runner.json`
 
 This layer is the right fit for:
 
@@ -106,51 +125,71 @@ This layer is the right fit for:
 - `issue.json`
 - template or persisted formats where schema drift should be obvious in review
 
-Targeted command:
+Targeted commands:
 
 - `go test ./internal/relay -run TestLoadFeatureListFixtures`
+- `go test ./internal/relay -run TestStoreLoadIssueFixtures`
 
 ## Practical Workflow
 
 Use the smallest loop first, then widen proof before you ship.
 
-1. Run the most targeted test for the layer you changed.
-2. Run adjacent package tests if you changed shared helpers.
-3. Run local CLI smoke commands for user-facing commands.
-4. Run `go test ./...` before commit or PR update.
+### Fast local iteration
 
-Recommended command sequence for this repository:
+Start with the narrowest package test that proves the change you just made.
 
 ```bash
-go test ./internal/cli -run TestHelpOutputGolden
-go test ./internal/cli -run TestRelaySubprocessIssueAddCreatesArtifacts
-go test ./internal/relay -run TestLoadFeatureListFixtures
-go test ./...
-go run ./cmd/relay help
-go run ./cmd/relay help pipeline
+go test ./internal/cli -run TestCommandOutputGolden
+go test ./internal/cli -run TestRelaySubprocess
+go test ./internal/relay -run TestStoreLoadIssueFixtures
 ```
 
-If you intentionally change help text, refresh the goldens first, review the snapshot diff, and then rerun `go test ./internal/cli -run TestHelpOutputGolden` without `-update`.
+Pick the smallest relevant command from that list instead of running all of them by default.
+
+### Broader pre-PR verification
+
+Before committing or updating a PR, widen to the full repository test suite.
+
+```bash
+go test ./...
+```
+
+That is the current repository-wide proof step for Relay.
+
+### Local CLI verification
+
+After the broader test pass, run the smallest real `relay` commands that cover the user-facing surface you changed.
+
+```bash
+go run ./cmd/relay help
+go run ./cmd/relay help status
+go run ./cmd/relay help report
+```
+
+If you changed status/report behavior against temp Relay state, also run a matching local command flow or keep the subprocess test focused on that path.
+
+If you intentionally change snapshot-protected output, refresh the goldens first, review the snapshot diff, and then rerun `go test ./internal/cli -run TestCommandOutputGolden` without `-update`.
 
 ## Where Each Change Belongs
 
 - use unit/package tests for validation logic, normalization, and transition rules
 - use in-process CLI tests for command dispatch and flows that need injected test doubles
 - use subprocess tests for real command execution, exit codes, stdout/stderr separation, and filesystem side effects
-- use goldens for stable long-form help text and other intentionally reviewed user-visible output
-- use contract fixtures for persisted JSON/YAML artifacts that other loops or tools consume
+- use goldens for stable long-form help text plus stable `status` and `report` output
+- use contract fixtures for persisted JSON/YAML artifacts that later Relay phases or tooling consume
 
 ## `relay-e2e` Decision for This Change
 
 I evaluated the repo-level `relay-e2e` layer for this work and did not extend it.
 
-Reason: the bundled `e2e/` scenarios validate Relay operating on a target repository through `relay serve --once` and an independent verification pass. That is useful for orchestration smoke coverage, but this task primarily changes Relay's own contributor verification guidance and adds repository-native tests for help output, subprocess command behavior, and artifact contracts. Those are better covered directly in `internal/cli` and `internal/relay` because they need exact assertions on help text, stderr/stdout splits, and fixture schema drift.
+Reason: the bundled `e2e/` scenarios validate Relay operating on a target repository through `relay serve --once` and an independent verification pass. That is useful for orchestration smoke coverage, but this Phase 2 work primarily broadens Relay's own repository-native verification layers: stable CLI goldens, subprocess command coverage, persisted `issue.json` contract fixtures, and contributor workflow documentation. Those need exact assertions on help text, `status` and `report` output, stdout/stderr splits, and fixture schema drift, so direct tests in `internal/cli` and `internal/relay` are the more accurate proof.
 
-Current gap: Relay still does not have a repository-level scenario that self-hosts these exact CLI verification layers end to end. For now, treat `relay-e2e` as complementary smoke coverage for orchestration, not as a replacement for the repository-native layers above.
+Current gap: Relay still does not have a repository-level scenario that self-hosts these exact CLI verification layers end to end. For now, treat `relay-e2e` as complementary orchestration smoke coverage, not as a replacement for the repository-native layers above.
 
-## Remaining Gaps
+## Remaining Phase 3+ Gaps
 
-- only a first stable help surface is snapshot-protected today; other user-visible reports can be added later if they prove stable enough
-- subprocess coverage currently exercises `pipeline import` and `issue add`; `serve`, `watch`, and failure paths still lean mostly on in-process tests
-- contract fixtures currently cover `feature_list.json`; `issue.json` and other persisted artifacts can gain dedicated fixtures if their schema becomes more important to external tooling
-- repo-level `relay-e2e` remains an orchestration smoke layer rather than a full self-hosted verification path for Relay's own CLI UX
+- add more stable golden coverage only when the output is intentionally reviewable, such as future `watch` summaries or carefully normalized failure/help surfaces
+- add failure-path subprocess coverage for missing issue state, interrupted runs, and other stderr-heavy flows that should stay stable across refactors
+- extend persisted artifact fixtures if later phases begin to depend on more structured files under issue artifact directories
+- add cross-platform smoke checks where path handling or shell behavior could diverge
+- keep `relay-e2e` focused on orchestration until there is a clear, deterministic self-hosted scenario for Relay’s own CLI UX

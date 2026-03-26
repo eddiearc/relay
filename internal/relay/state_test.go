@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStoreSavesIssuesIntoPerIssueDirectories(t *testing.T) {
@@ -143,5 +144,133 @@ func TestStoreLoadIssueRejectsInvalidAgentRunner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "issue.agent_runner") {
 		t.Fatalf("expected issue.agent_runner error, got %v", err)
+	}
+}
+
+func TestStoreLoadIssueFixtures(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		issueID   string
+		fixture   string
+		wantErr   string
+		wantCheck func(t *testing.T, issue Issue, issueDir string)
+	}{
+		{
+			name:    "valid",
+			issueID: "issue-fixture",
+			fixture: "issue_valid.json",
+			wantCheck: func(t *testing.T, issue Issue, issueDir string) {
+				t.Helper()
+				if issue.ArtifactDir != issueDir {
+					t.Fatalf("expected artifact dir %s, got %s", issueDir, issue.ArtifactDir)
+				}
+				if issue.Status != IssueStatusRunning {
+					t.Fatalf("expected running status, got %s", issue.Status)
+				}
+				if issue.CurrentLoop != 2 {
+					t.Fatalf("expected current loop 2, got %d", issue.CurrentLoop)
+				}
+				if issue.ActivePhase != "coding" {
+					t.Fatalf("expected active phase coding, got %s", issue.ActivePhase)
+				}
+			},
+		},
+		{name: "missing-goal", issueID: "issue-missing-goal", fixture: "issue_invalid_missing_goal.json", wantErr: "issue.goal is required"},
+		{name: "invalid-agent-runner", issueID: "issue-invalid-runner", fixture: "issue_invalid_agent_runner.json", wantErr: "issue.agent_runner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := NewStore(root)
+			store.WorkspaceRoot = filepath.Join(root, "workspaces")
+			if err := store.Ensure(); err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+
+			fixturePath := filepath.Join("testdata", tc.fixture)
+			data, err := os.ReadFile(fixturePath)
+			if err != nil {
+				t.Fatalf("read fixture %s: %v", fixturePath, err)
+			}
+			issueDir := store.IssueDir(tc.issueID)
+			if err := os.MkdirAll(issueDir, 0o755); err != nil {
+				t.Fatalf("mkdir issue dir: %v", err)
+			}
+			if err := os.WriteFile(IssueFilePath(issueDir), data, 0o644); err != nil {
+				t.Fatalf("write issue fixture: %v", err)
+			}
+
+			issue, err := store.LoadIssue(tc.issueID)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("LoadIssue: %v", err)
+				}
+				if tc.wantCheck != nil {
+					tc.wantCheck(t, issue, issueDir)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("expected error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestStoreConcurrentSaveAndLoadIssueDoesNotSeePartialJSON(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	store.WorkspaceRoot = filepath.Join(root, "workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	issue := Issue{
+		ID:           "issue-concurrent",
+		PipelineName: "demo",
+		Goal:         "ship",
+		Description:  strings.Repeat("payload-", 1<<17),
+		Status:       IssueStatusRunning,
+	}
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for loop := 0; loop < 200; loop++ {
+			issue.CurrentLoop = loop
+			if err := store.SaveIssue(issue); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case err := <-errCh:
+			t.Fatalf("save issue: %v", err)
+		case <-done:
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for concurrent save loop")
+		default:
+			_, err := store.LoadIssue(issue.ID)
+			if err == nil {
+				continue
+			}
+			if strings.Contains(err.Error(), "parse issue.json") {
+				t.Fatalf("saw partial issue.json during concurrent load: %v", err)
+			}
+		}
 	}
 }

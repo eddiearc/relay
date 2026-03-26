@@ -156,7 +156,7 @@ From those sources, Relay derives the following operating policy for project wor
 - if those verification layers do not exist, the agent should say so explicitly, recommend the missing script, test suite, or skill, and avoid pretending the task is fully specified
 - missing unit tests are a separate red flag and should be called out even more strongly
 
-For the repository-native testing map and contributor command sequence, see `docs/verification.md`.
+For the repository-native testing map and contributor command sequence, see `docs/verification.md`. The default proof path is targeted package tests, then `go test ./...`, then the smallest real `go run ./cmd/relay ...` commands that cover the changed user-facing surface.
 
 ### Product Idea
 
