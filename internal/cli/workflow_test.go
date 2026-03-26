@@ -380,6 +380,67 @@ func TestWatchRemindsToRunServeWhenIssueHasNotStarted(t *testing.T) {
 	}
 }
 
+func TestWatchReportsAgentActivityFromLiveLogFiles(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-watch-activity")
+	store := relay.NewStore(stateDir)
+	store.WorkspaceRoot = filepath.Join(stateDir, "workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("ensure store: %v", err)
+	}
+
+	issue := relay.Issue{
+		ID:           "issue-watch-activity",
+		PipelineName: "demo-watch-activity",
+		Goal:         "goal",
+		Description:  "desc",
+		Status:       relay.IssueStatusRunning,
+		CurrentLoop:  1,
+		ActivePhase:  "coding",
+		ActivePIDs:   []int{99999},
+	}
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("save issue: %v", err)
+	}
+
+	runDir := store.RunDir(issue.ID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "loop-01.stdout.log"), []byte("line one\nline two\nworking on feature X\n"), 0o644); err != nil {
+		t.Fatalf("write stdout log: %v", err)
+	}
+
+	done := make(chan int, 1)
+	var stdout bytes.Buffer
+	go func() {
+		done <- run([]string{"watch", "-issue", issue.ID, "--poll-interval", "10ms", "-state-dir", stateDir}, &stdout, io.Discard)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	issue.Status = relay.IssueStatusDone
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("save done issue: %v", err)
+	}
+
+	select {
+	case exitCode := <-done:
+		if exitCode != 0 {
+			t.Fatalf("expected exit 0, got %d", exitCode)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("watch did not complete")
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "agent_active") {
+		t.Fatalf("expected agent_active line, got %s", output)
+	}
+	if !strings.Contains(output, "working on feature X") {
+		t.Fatalf("expected last line from stdout log, got %s", output)
+	}
+}
+
 func savePipelineForTest(t *testing.T, stateDir string, pipeline relay.Pipeline) {
 	t.Helper()
 	store := relay.NewStore(stateDir)

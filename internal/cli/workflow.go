@@ -123,6 +123,7 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 	var progressSnapshot string
 	var latestRunSummary string
 	var startHintShown bool
+	var previousActivity string
 
 	for {
 		issue, err := store.LoadIssue(*issueID)
@@ -150,6 +151,11 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 			for _, line := range lines {
 				_, _ = fmt.Fprintf(stdout, "event=%s\n", line)
 			}
+		}
+
+		if activity := summarizeAgentActivity(store, issue); activity != "" && activity != previousActivity {
+			previousActivity = activity
+			_, _ = fmt.Fprintf(stdout, "%s\n", activity)
 		}
 
 		if !startHintShown && issue.Status == relay.IssueStatusTodo && issue.CurrentLoop == 0 && issue.ActivePhase == "" && progressSnapshot == "" && eventOffset == 0 && !hasNonEmptyFile(eventsPath) {
@@ -284,6 +290,52 @@ func summarizeLatestRunFailure(store *relay.Store, issueID string) string {
 			if summary != "" {
 				return filepath.Base(candidate.path) + ": " + summary
 			}
+		}
+	}
+	return ""
+}
+
+func summarizeAgentActivity(store *relay.Store, issue relay.Issue) string {
+	if !relay.IsIssueActiveStatus(issue.Status) {
+		return ""
+	}
+	if len(issue.ActivePIDs) == 0 {
+		return ""
+	}
+
+	loopID := "plan"
+	if issue.ActivePhase == "coding" {
+		loopID = fmt.Sprintf("loop-%02d", issue.CurrentLoop)
+	}
+
+	stdoutPath := filepath.Join(store.RunDir(issue.ID), loopID+".stdout.log")
+	info, err := os.Stat(stdoutPath)
+	if err != nil {
+		return fmt.Sprintf("agent_active pid=%d phase=%s", issue.ActivePIDs[0], issue.ActivePhase)
+	}
+
+	lastLine := lastNonEmptyLine(stdoutPath)
+	if lastLine == "" {
+		return fmt.Sprintf("agent_active pid=%d phase=%s output_bytes=%d", issue.ActivePIDs[0], issue.ActivePhase, info.Size())
+	}
+
+	const maxLineLen = 120
+	if len(lastLine) > maxLineLen {
+		lastLine = lastLine[:maxLineLen] + "..."
+	}
+	return fmt.Sprintf("agent_active pid=%d phase=%s output_bytes=%d last_line=%s", issue.ActivePIDs[0], issue.ActivePhase, info.Size(), lastLine)
+}
+
+func lastNonEmptyLine(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			return line
 		}
 	}
 	return ""
