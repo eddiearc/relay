@@ -311,6 +311,110 @@ func TestClaudeRunnerRunDirectCLI(t *testing.T) {
 	}
 }
 
+func TestCodexRunnerStreamsOutputToLogDir(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	logDir := filepath.Join(tempDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+
+	codexPath := writeFakeCodex(t, tempDir)
+	t.Setenv("RUNNER_RECORD_FILE", filepath.Join(tempDir, "args.txt"))
+	t.Setenv("RUNNER_PROMPT_FILE", filepath.Join(tempDir, "prompt.txt"))
+	t.Setenv("RUNNER_PWD_FILE", filepath.Join(tempDir, "pwd.txt"))
+	t.Setenv("RUNNER_STDOUT_TEXT", "codex-streamed-stdout")
+	t.Setenv("RUNNER_STDERR_TEXT", "codex-streamed-stderr")
+	t.Setenv("RUNNER_FINAL_TEXT", "codex-final")
+
+	runner := CodexRunner{Command: codexPath}
+	result, err := runner.Run(context.Background(), AgentRunRequest{
+		Phase:   "coding",
+		Workdir: repoPath,
+		Prompt:  "test prompt",
+		IssueID: "issue-stream",
+		LoopID:  "loop-01",
+		LogDir:  logDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Stdout != "codex-streamed-stdout" {
+		t.Fatalf("expected stdout in result, got %q", result.Stdout)
+	}
+
+	stdoutLog, err := os.ReadFile(filepath.Join(logDir, "loop-01.stdout.log"))
+	if err != nil {
+		t.Fatalf("read stdout log: %v", err)
+	}
+	if string(stdoutLog) != "codex-streamed-stdout" {
+		t.Fatalf("expected streamed stdout log, got %q", string(stdoutLog))
+	}
+
+	stderrLog, err := os.ReadFile(filepath.Join(logDir, "loop-01.stderr.log"))
+	if err != nil {
+		t.Fatalf("read stderr log: %v", err)
+	}
+	if string(stderrLog) != "codex-streamed-stderr" {
+		t.Fatalf("expected streamed stderr log, got %q", string(stderrLog))
+	}
+}
+
+func TestClaudeRunnerStreamsOutputToLogDir(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	logDir := filepath.Join(tempDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+
+	claudePath := writeFakeClaude(t, tempDir)
+	t.Setenv("RUNNER_RECORD_FILE", filepath.Join(tempDir, "args.txt"))
+	t.Setenv("RUNNER_PROMPT_FILE", filepath.Join(tempDir, "prompt.txt"))
+	t.Setenv("RUNNER_PWD_FILE", filepath.Join(tempDir, "pwd.txt"))
+	t.Setenv("RUNNER_STDOUT_TEXT", "claude-streamed-stdout")
+	t.Setenv("RUNNER_STDERR_TEXT", "claude-streamed-stderr")
+
+	runner := ClaudeRunner{Command: claudePath}
+	result, err := runner.Run(context.Background(), AgentRunRequest{
+		Phase:   "coding",
+		Workdir: repoPath,
+		Prompt:  "test prompt",
+		IssueID: "issue-stream",
+		LoopID:  "loop-01",
+		LogDir:  logDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	stdoutLog, err := os.ReadFile(filepath.Join(logDir, "loop-01.stdout.log"))
+	if err != nil {
+		t.Fatalf("read stdout log: %v", err)
+	}
+	if string(stdoutLog) != "claude-streamed-stdout" {
+		t.Fatalf("expected streamed stdout log, got %q", string(stdoutLog))
+	}
+
+	stderrLog, err := os.ReadFile(filepath.Join(logDir, "loop-01.stderr.log"))
+	if err != nil {
+		t.Fatalf("read stderr log: %v", err)
+	}
+	if string(stderrLog) != "claude-streamed-stderr" {
+		t.Fatalf("expected streamed stderr log, got %q", string(stderrLog))
+	}
+
+	if result.FinalMessage != "claude-streamed-stdout" {
+		t.Fatalf("expected final message to mirror stdout, got %q", result.FinalMessage)
+	}
+}
+
 func writeFakeCodex(t *testing.T, dir string) string {
 	t.Helper()
 	return writeFakeRunner(t, dir, "codex")

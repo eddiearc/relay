@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ type AgentRunRequest struct {
 	Prompt  string
 	IssueID string
 	LoopID  string
+	LogDir  string
 	OnPID   func(pid int)
 }
 
@@ -65,8 +67,28 @@ func (r CodexRunner) Run(ctx context.Context, req AgentRunRequest) (AgentRunResu
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+
+	stdoutFile, fileErr := openLogWriter(req.LogDir, req.LoopID, ".stdout.log")
+	if fileErr != nil {
+		return AgentRunResult{}, fmt.Errorf("open stdout log: %w", fileErr)
+	}
+	if stdoutFile != nil {
+		defer stdoutFile.Close()
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutFile)
+	} else {
+		cmd.Stdout = &stdout
+	}
+
+	stderrFile, fileErr := openLogWriter(req.LogDir, req.LoopID, ".stderr.log")
+	if fileErr != nil {
+		return AgentRunResult{}, fmt.Errorf("open stderr log: %w", fileErr)
+	}
+	if stderrFile != nil {
+		defer stderrFile.Close()
+		cmd.Stderr = io.MultiWriter(&stderr, stderrFile)
+	} else {
+		cmd.Stderr = &stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		return AgentRunResult{
@@ -87,6 +109,9 @@ func (r CodexRunner) Run(ctx context.Context, req AgentRunRequest) (AgentRunResu
 	}
 	if data, readErr := os.ReadFile(finalMessagePath); readErr == nil {
 		result.FinalMessage = string(data)
+	}
+	if req.LogDir != "" && result.FinalMessage != "" {
+		_ = os.WriteFile(filepath.Join(req.LogDir, req.LoopID+".final.txt"), []byte(result.FinalMessage), 0o644)
 	}
 	if err != nil {
 		return result, fmt.Errorf("run codex exec: %w", err)
@@ -121,8 +146,28 @@ func (r ClaudeRunner) Run(ctx context.Context, req AgentRunRequest) (AgentRunRes
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+
+	stdoutFile, fileErr := openLogWriter(req.LogDir, req.LoopID, ".stdout.log")
+	if fileErr != nil {
+		return AgentRunResult{}, fmt.Errorf("open stdout log: %w", fileErr)
+	}
+	if stdoutFile != nil {
+		defer stdoutFile.Close()
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutFile)
+	} else {
+		cmd.Stdout = &stdout
+	}
+
+	stderrFile, fileErr := openLogWriter(req.LogDir, req.LoopID, ".stderr.log")
+	if fileErr != nil {
+		return AgentRunResult{}, fmt.Errorf("open stderr log: %w", fileErr)
+	}
+	if stderrFile != nil {
+		defer stderrFile.Close()
+		cmd.Stderr = io.MultiWriter(&stderr, stderrFile)
+	} else {
+		cmd.Stderr = &stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		return AgentRunResult{
@@ -206,6 +251,20 @@ func resolveCommandSpec(command string, args []string, binary string, lookPath f
 		Command: resolved,
 		Args:    append([]string(nil), args...),
 	}, nil
+}
+
+func openLogWriter(logDir, loopID, suffix string) (*os.File, error) {
+	if logDir == "" {
+		return nil, nil
+	}
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(
+		filepath.Join(logDir, loopID+suffix),
+		os.O_CREATE|os.O_WRONLY|os.O_TRUNC,
+		0o644,
+	)
 }
 
 func exitCodeFromErr(err error) int {
