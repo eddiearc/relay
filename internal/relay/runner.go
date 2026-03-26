@@ -202,6 +202,26 @@ type commandSpec struct {
 	Args    []string
 }
 
+// DetectAvailableRunners returns the names of agent runners found in PATH.
+func DetectAvailableRunners() []string {
+	var available []string
+	for _, name := range []string{AgentRunnerCodex, AgentRunnerClaude} {
+		if _, err := exec.LookPath(name); err == nil {
+			available = append(available, name)
+		}
+	}
+	return available
+}
+
+// DetectDefaultRunner returns the best available runner, or empty string if none found.
+func DetectDefaultRunner() string {
+	available := DetectAvailableRunners()
+	if len(available) == 0 {
+		return ""
+	}
+	return available[0]
+}
+
 func ResolveAgentRunner(issueRunner, pipelineRunner string) (string, error) {
 	if err := validateAgentRunner("issue.agent_runner", issueRunner); err != nil {
 		return "", err

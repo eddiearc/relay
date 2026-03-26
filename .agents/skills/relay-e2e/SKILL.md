@@ -45,7 +45,8 @@ which claude 2>/dev/null && echo "claude available"
 
 Runner selection logic:
 - If the user explicitly requested a runner (e.g., `/relay-e2e codex` or `/relay-e2e claude`), use that runner. Error if not installed.
-- If no runner specified, auto-detect: prefer `claude` if available, fall back to `codex`.
+- If no runner specified and you are running inside Claude Code, prefer `claude`. If inside Codex CLI, prefer `codex`.
+- Otherwise auto-detect: use the first available runner found in PATH.
 - If neither is installed, stop and report.
 
 Map runner to scenario file:

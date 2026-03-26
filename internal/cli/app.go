@@ -1136,10 +1136,24 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "read coding prompt: %v\n", err)
 		return 1
 	}
+	resolvedRunner := *agentRunner
+	if resolvedRunner == "" {
+		resolvedRunner = relay.DetectDefaultRunner()
+		if resolvedRunner != "" {
+			_, _ = fmt.Fprintf(stderr, "detected agent runner: %s\n", resolvedRunner)
+		}
+		available := relay.DetectAvailableRunners()
+		if len(available) > 1 {
+			_, _ = fmt.Fprintf(stderr, "other available runners: %s (use --agent-runner to override)\n", strings.Join(available[1:], ", "))
+		}
+		if len(available) == 0 {
+			_, _ = fmt.Fprintf(stderr, "warning: no agent runner found in PATH (codex or claude); serve will fail unless one is installed\n")
+		}
+	}
 	pipeline := relay.Pipeline{
 		Name:         fs.Arg(0),
 		InitCommand:  *initCommand,
-		AgentRunner:  *agentRunner,
+		AgentRunner:  resolvedRunner,
 		LoopNum:      *loopNum,
 		PlanPrompt:   string(planPrompt),
 		CodingPrompt: string(codingPrompt),

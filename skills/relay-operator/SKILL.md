@@ -32,6 +32,13 @@ For concrete operations, use the Relay CLI as the source of truth:
 - `relay watch -issue <id>`
 - `relay help upgrade`
 
+Agent runner selection:
+
+- `relay pipeline add` auto-detects available runners (`codex`, `claude`) from PATH when `--agent-runner` is not specified
+- if you are running inside Claude Code, suggest `--agent-runner claude` to the user
+- if you are running inside Codex CLI, suggest `--agent-runner codex` to the user
+- if the user does not specify, the CLI will detect and select the first available runner automatically
+
 Rules:
 
 - do not restate Relay workflows from memory when CLI help already covers them

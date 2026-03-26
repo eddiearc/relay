@@ -696,6 +696,45 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	}
 }
 
+func TestPipelineAddAutoDetectsRunner(t *testing.T) {
+	stateDir := t.TempDir()
+	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
+	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"pipeline", "add",
+		"--init-command", "git init repo",
+		"--loop-num", "2",
+		"--plan-prompt-file", planPrompt,
+		"--coding-prompt-file", codingPrompt,
+		"-state-dir", stateDir,
+		"demo-detect",
+	}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+
+	// Should have detected a runner (both codex and claude are available in CI/dev)
+	available := relay.DetectAvailableRunners()
+	if len(available) == 0 {
+		t.Skip("no agent runners in PATH, skipping detection test")
+	}
+
+	if !strings.Contains(stderr.String(), "detected agent runner:") {
+		t.Fatalf("expected detection message in stderr, got %s", stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(stateDir, "pipelines", "demo-detect.yaml"))
+	if err != nil {
+		t.Fatalf("read pipeline: %v", err)
+	}
+	if !bytes.Contains(data, []byte("agent_runner: "+available[0])) {
+		t.Fatalf("expected auto-detected runner %q in saved pipeline, got %s", available[0], string(data))
+	}
+}
+
 func TestPipelineImportSavesYAMLPipeline(t *testing.T) {
 	stateDir := t.TempDir()
 	pipelineFile := writeTempFile(t, "pipeline.yaml", ""+
