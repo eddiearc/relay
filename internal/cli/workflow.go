@@ -123,6 +123,8 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 	var progressSnapshot string
 	var latestRunSummary string
 	var startHintShown bool
+	var previousLastLine string
+	var tracker agentLogTracker
 
 	for {
 		issue, err := store.LoadIssue(*issueID)
@@ -149,6 +151,15 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 			eventOffset = nextOffset
 			for _, line := range lines {
 				_, _ = fmt.Fprintf(stdout, "event=%s\n", line)
+			}
+		}
+
+		if activity := summarizeAgentActivity(store, issue, &tracker); activity != "" {
+			// Only emit when last_line actually changes — keeps output stable for prompt cache
+			currentLastLine := tracker.lastLine
+			if currentLastLine != previousLastLine {
+				previousLastLine = currentLastLine
+				_, _ = fmt.Fprintf(stdout, "%s\n", activity)
 			}
 		}
 
@@ -287,6 +298,127 @@ func summarizeLatestRunFailure(store *relay.Store, issueID string) string {
 		}
 	}
 	return ""
+}
+
+// agentLogTracker tracks a live agent log file incrementally.
+type agentLogTracker struct {
+	path       string
+	offset     int64
+	lastLine   string
+	seenInitial bool
+}
+
+const (
+	logTailInitBytes = 64 * 1024 // ~2000 lines on first read
+	logTailPollBytes = 8 * 1024  // incremental reads
+	maxLineLen       = 120
+)
+
+// reset prepares the tracker for a new log file (e.g., phase changed).
+func (t *agentLogTracker) reset(path string) {
+	t.path = path
+	t.offset = 0
+	t.lastLine = ""
+	t.seenInitial = false
+}
+
+// poll reads new data from the log file and returns the last non-empty line if changed.
+// On first poll, reads up to the tail of the file (logTailInitBytes).
+// On subsequent polls, reads only new bytes since last offset.
+func (t *agentLogTracker) poll() (lastLine string, changed bool) {
+	info, err := os.Stat(t.path)
+	if err != nil {
+		return "", false
+	}
+	size := info.Size()
+
+	var readFrom int64
+	var readSize int64
+	if !t.seenInitial {
+		// First read: take the tail
+		readFrom = size - int64(logTailInitBytes)
+		if readFrom < 0 {
+			readFrom = 0
+		}
+		readSize = size - readFrom
+		t.seenInitial = true
+	} else {
+		if size <= t.offset {
+			return t.lastLine, false
+		}
+		readFrom = t.offset
+		readSize = size - t.offset
+		if readSize > int64(logTailPollBytes) {
+			// Skip ahead if too much accumulated
+			readFrom = size - int64(logTailPollBytes)
+			readSize = int64(logTailPollBytes)
+		}
+	}
+	t.offset = size
+
+	file, err := os.Open(t.path)
+	if err != nil {
+		return t.lastLine, false
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(readFrom, io.SeekStart); err != nil {
+		return t.lastLine, false
+	}
+	buf := make([]byte, readSize)
+	n, err := file.Read(buf)
+	if n == 0 {
+		return t.lastLine, false
+	}
+	buf = buf[:n]
+
+	// Find last non-empty line in the chunk
+	line := lastNonEmptyLineFromBytes(buf)
+	if line == "" {
+		return t.lastLine, false
+	}
+	if len(line) > maxLineLen {
+		line = line[:maxLineLen] + "..."
+	}
+	if line == t.lastLine {
+		return line, false
+	}
+	t.lastLine = line
+	return line, true
+}
+
+func lastNonEmptyLineFromBytes(data []byte) string {
+	s := strings.TrimRight(string(data), "\n")
+	idx := strings.LastIndex(s, "\n")
+	if idx < 0 {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(s[idx+1:])
+}
+
+func summarizeAgentActivity(store *relay.Store, issue relay.Issue, tracker *agentLogTracker) string {
+	if !relay.IsIssueActiveStatus(issue.Status) {
+		return ""
+	}
+	if len(issue.ActivePIDs) == 0 {
+		return ""
+	}
+
+	loopID := "plan"
+	if issue.ActivePhase == "coding" {
+		loopID = fmt.Sprintf("loop-%02d", issue.CurrentLoop)
+	}
+
+	stdoutPath := filepath.Join(store.RunDir(issue.ID), loopID+".stdout.log")
+	if tracker.path != stdoutPath {
+		tracker.reset(stdoutPath)
+	}
+
+	lastLine, _ := tracker.poll()
+	if lastLine == "" {
+		return fmt.Sprintf("agent_active pid=%d phase=%s", issue.ActivePIDs[0], issue.ActivePhase)
+	}
+	return fmt.Sprintf("agent_active pid=%d phase=%s last_line=%s", issue.ActivePIDs[0], issue.ActivePhase, lastLine)
 }
 
 func summarizeLogSnippet(value string) string {

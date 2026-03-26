@@ -520,6 +520,11 @@ type fakeAgentRunner struct {
 }
 
 func (f *fakeAgentRunner) Run(_ context.Context, req AgentRunRequest) (AgentRunResult, error) {
+	if req.LogDir != "" {
+		_ = os.MkdirAll(req.LogDir, 0o755)
+		_ = os.WriteFile(filepath.Join(req.LogDir, req.LoopID+".stdout.log"), []byte("ok"), 0o644)
+		_ = os.WriteFile(filepath.Join(req.LogDir, req.LoopID+".stderr.log"), []byte(""), 0o644)
+	}
 	switch req.Phase {
 	case "plan":
 		if f.plan == nil {
