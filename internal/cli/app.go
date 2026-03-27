@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/eddiearc/relay/internal/relay"
+	internalrelease "github.com/eddiearc/relay/internal/release"
 )
 
 var usage = `relay is a goal-driven supervisor CLI.
@@ -25,14 +26,16 @@ Usage:
 
 Workflow:
   1. relay help
-  2. relay version
-  3. relay upgrade --check
-  4. relay help pipeline
-  5. relay help issue
-  6. relay serve --once
+  2. relay help release
+  3. relay version
+  4. relay upgrade --check
+  5. relay help pipeline
+  6. relay help issue
+  7. relay serve --once
 
 Examples:
   relay help
+  relay release inspect --repo . --published-release-tag v0.2.1
   relay version
   relay upgrade --check
   relay pipeline import -file pipeline.yaml
@@ -51,6 +54,7 @@ Commands:
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
+  release  Inspect repository release decisions
   upgrade  Upgrade the relay CLI
   version  Show build version information
   help     Show detailed help for a command or subcommand
@@ -58,6 +62,7 @@ Commands:
 More help:
   relay help serve
   relay help watch
+  relay help release
   relay help pipeline add
   relay help pipeline show
   relay help pipeline template
@@ -517,6 +522,42 @@ Examples:
   relay watch -issue issue-123 --poll-interval 1s
 `
 
+var releaseUsage = `inspect repository release policy decisions.
+
+Usage:
+  relay release <subcommand> [arguments]
+  relay help release <subcommand>
+
+Subcommands:
+  inspect  Print the deterministic release action for a repository state
+
+Examples:
+  relay release inspect --repo . --published-release-tag v0.2.1
+  relay release inspect --repo . --published-release-tag v0.2.1 --format json
+`
+
+var releaseInspectUsage = `print the deterministic release action for a repository state.
+
+Usage:
+  relay release inspect [flags]
+
+Flags:
+  --repo <path>                   Repository path to inspect (default: .)
+  --main-ref <ref>                Main branch ref or commit to inspect (default: HEAD)
+  --published-release-tag <tag>   Published release tag to consider; repeatable
+  --format <text|json>            Output format (default: text)
+
+What it prints:
+  - latest published release tag reachable from the inspected main ref
+  - unreleased commit count after that release
+  - explicit semver tags already pointing at HEAD
+  - chosen action: noop, publish-explicit-tag, or auto-cut-patch
+
+Examples:
+  relay release inspect --repo . --published-release-tag v0.2.1
+  relay release inspect --repo . --published-release-tag v0.2.1 --format json
+`
+
 var versionUsage = `show build version information.
 
 Usage:
@@ -719,6 +760,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReport(args[1:], stdout, stderr)
 	case "kill":
 		return runKill(args[1:], stdout, stderr)
+	case "release":
+		return runRelease(args[1:], stdout, stderr)
 	case "upgrade":
 		return runUpgrade(args[1:], stdout, stderr)
 	case "version":
@@ -762,6 +805,8 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 	case "kill":
 		_, _ = io.WriteString(stdout, killUsage)
 		return 0
+	case "release":
+		return runReleaseHelp(args[1:], stdout, stderr)
 	case "upgrade":
 		_, _ = io.WriteString(stdout, upgradeUsage)
 		return 0
@@ -836,6 +881,119 @@ func runIssueHelp(args []string, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown issue help topic %q\n\n%s", args[0], issueUsage)
+		return 1
+	}
+}
+
+func runRelease(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, releaseUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		return runReleaseHelp(args[1:], stdout, stderr)
+	}
+
+	switch args[0] {
+	case "inspect":
+		return runReleaseInspect(args[1:], stdout, stderr)
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown release subcommand %q\n\n%s", args[0], releaseUsage)
+		return 1
+	}
+}
+
+func runReleaseHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stdout, releaseUsage)
+		return 0
+	}
+	if isHelpArg(args[0]) {
+		_, _ = io.WriteString(stdout, releaseUsage)
+		return 0
+	}
+
+	switch args[0] {
+	case "inspect":
+		_, _ = io.WriteString(stdout, releaseInspectUsage)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown release help topic %q\n\n%s", args[0], releaseUsage)
+		return 1
+	}
+}
+
+type repeatedStringFlag []string
+
+func (f *repeatedStringFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatedStringFlag) Set(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		*f = append(*f, trimmed)
+	}
+	return nil
+}
+
+func runReleaseInspect(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("release inspect", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		_, _ = io.WriteString(stdout, releaseInspectUsage)
+	}
+	repoPath := fs.String("repo", ".", "repository path to inspect")
+	mainRef := fs.String("main-ref", "HEAD", "main branch ref or commit to inspect")
+	format := fs.String("format", "text", "output format: text or json")
+	var publishedReleaseTags repeatedStringFlag
+	fs.Var(&publishedReleaseTags, "published-release-tag", "published release tag to consider; repeatable")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if fs.NArg() != 0 {
+		_, _ = io.WriteString(stderr, "release inspect does not take positional arguments\n")
+		return 1
+	}
+
+	state, err := internalrelease.InspectRepository(*repoPath, internalrelease.InspectOptions{
+		MainRef:              *mainRef,
+		PublishedReleaseTags: publishedReleaseTags,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "inspect release policy: %v\n", err)
+		return 1
+	}
+	decision, err := internalrelease.Evaluate(state)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "evaluate release policy: %v\n", err)
+		return 1
+	}
+
+	switch strings.ToLower(strings.TrimSpace(*format)) {
+	case "", "text":
+		_, _ = fmt.Fprintf(stdout, "action=%s\n", decision.Action)
+		_, _ = fmt.Fprintf(stdout, "tag=%s\n", decision.Tag)
+		_, _ = fmt.Fprintf(stdout, "reason=%s\n", decision.Reason)
+		_, _ = fmt.Fprintf(stdout, "latest_published_tag=%s\n", decision.LatestPublishedTag)
+		_, _ = fmt.Fprintf(stdout, "latest_published_sha=%s\n", decision.LatestPublishedSHA)
+		_, _ = fmt.Fprintf(stdout, "head_sha=%s\n", decision.HeadSHA)
+		_, _ = fmt.Fprintf(stdout, "unreleased_commits=%d\n", decision.UnreleasedCommits)
+		_, _ = fmt.Fprintf(stdout, "covering_explicit_tags=%s\n", strings.Join(decision.CoveringExplicitTags, ","))
+		return 0
+	case "json":
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(decision); err != nil {
+			_, _ = fmt.Fprintf(stderr, "encode release decision: %v\n", err)
+			return 1
+		}
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unsupported format %q\n", *format)
 		return 1
 	}
 }

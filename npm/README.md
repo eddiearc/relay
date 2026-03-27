@@ -56,11 +56,16 @@ The publish script is idempotent for an already-published version. It skips pack
 
 ## CI Publishing
 
-The GitHub release workflow already builds `dist/*.tar.gz`. After that it:
+Relay now splits release automation into two workflows:
 
-1. runs `npm --prefix npm run prepare-release`
-2. publishes the four platform packages
-3. publishes `@eddiearc/relay` last
+1. `release-policy.yml` evaluates `main` against the latest published release.
+2. It no-ops when `main` is already covered.
+3. It publishes an explicit stable tag on `HEAD` when one exists.
+4. Otherwise it creates the next patch release from the latest published tag.
+5. If no published release baseline exists yet, the first release stays explicit/manual.
+6. `release.yml` then builds `dist/*.tar.gz`, runs `npm --prefix npm run prepare-release`, publishes the four platform packages, and publishes `@eddiearc/relay` last.
+
+For a workflow-safe dry run, trigger `release-policy.yml` manually with `dry_run=true`. Use `published_release_tag` if you want to simulate a published baseline without creating a real release first.
 
 ## npm Setup
 

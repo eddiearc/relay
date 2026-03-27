@@ -1,0 +1,110 @@
+name: Release Policy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to evaluate
+        required: false
+        default: main
+      dry_run:
+        description: Inspect the decision without publishing a release
+        required: false
+        default: true
+        type: boolean
+      published_release_tag:
+        description: Optional published release baseline override for dry-run validation
+        required: false
+        default: ""
+
+jobs:
+  evaluate:
+    name: Evaluate release coverage for main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.sha }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+      PUBLISHED_RELEASE_TAG_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.published_release_tag || '' }}
+
+    steps:
+      - name: Check out repository at target ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TARGET_REF }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Fetch tags
+        run: git fetch --force --tags origin
+
+      - name: Resolve published release tags
+        run: |
+          set -euo pipefail
+          if [ -n "$PUBLISHED_RELEASE_TAG_OVERRIDE" ]; then
+            printf '%s\n' "$PUBLISHED_RELEASE_TAG_OVERRIDE" > "$RUNNER_TEMP/published-release-tags.txt"
+          else
+            gh release list --limit 200 --exclude-drafts --json tagName,isPrerelease \
+              --jq '.[] | select(.isPrerelease == false) | .tagName' > "$RUNNER_TEMP/published-release-tags.txt"
+          fi
+          cat "$RUNNER_TEMP/published-release-tags.txt"
+
+      - name: Inspect release decision
+        id: inspect
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            args+=(--published-release-tag "$tag")
+          done < "$RUNNER_TEMP/published-release-tags.txt"
+
+          go run ./cmd/relay release inspect \
+            --repo "$GITHUB_WORKSPACE" \
+            --main-ref HEAD \
+            --format json \
+            "${args[@]}" | tee "$RUNNER_TEMP/release-decision.json"
+
+          action=$(jq -r '.action' "$RUNNER_TEMP/release-decision.json")
+          tag=$(jq -r '.tag // empty' "$RUNNER_TEMP/release-decision.json")
+          reason=$(jq -r '.reason' "$RUNNER_TEMP/release-decision.json")
+
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo 'reason<<EOF'
+            echo "$reason"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Print release decision
+        run: |
+          echo "action=${{ steps.inspect.outputs.action }}"
+          echo "tag=${{ steps.inspect.outputs.tag }}"
+          echo "reason=${{ steps.inspect.outputs.reason }}"
+          cat "$RUNNER_TEMP/release-decision.json"
+
+      - name: Stop after dry run
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: echo "Dry run requested; not publishing a GitHub release."
+
+      - name: Publish explicit tag release
+        if: ${{ env.DRY_RUN != 'true' && steps.inspect.outputs.action == 'publish-explicit-tag' }}
+        run: gh release create "${{ steps.inspect.outputs.tag }}" --target "$TARGET_REF" --title "${{ steps.inspect.outputs.tag }}" --generate-notes
+
+      - name: Publish automatic patch release
+        if: ${{ env.DRY_RUN != 'true' && steps.inspect.outputs.action == 'auto-cut-patch' }}
+        run: gh release create "${{ steps.inspect.outputs.tag }}" --target "$TARGET_REF" --title "${{ steps.inspect.outputs.tag }}" --generate-notes
+
+      - name: No release required
+        if: ${{ steps.inspect.outputs.action == 'noop' }}
+        run: echo "No release publication needed for this main commit."
