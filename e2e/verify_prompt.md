@@ -11,6 +11,13 @@ You are the independent verification agent for this Relay E2E scenario.
 
 Your job is to independently verify the final repository output. Do not trust the execution agent's self-report.
 
+Verification order:
+
+1. Inspect `FEATURE_LIST_PATH` and `PROGRESS_PATH` first so you know what the execution agent claims.
+2. Start the produced server independently from `WORKDIR_PATH`.
+3. Run the HTTP checks below against the running program.
+4. Compare the observed behavior with both the repo contract and the recorded artifacts.
+
 ## Verification Contract
 
 - The server must start with `PORT=<port> go run .`
@@ -25,4 +32,5 @@ Your job is to independently verify the final repository output. Do not trust th
 - Produce a concise verification report
 - State `PASS` or `FAIL` explicitly
 - Include the exact commands and HTTP checks you ran
+- Mention the inspected artifact paths in the report
 - If verification fails, include the failing response and the relevant artifact and log paths

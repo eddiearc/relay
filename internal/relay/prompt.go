@@ -16,6 +16,10 @@ You must work from the task workdir and task context, then write the task artifa
 
 Requirements:
 - Understand the issue goal, description, and repository context before planning.
+- Default to phased plans when the work is repo-wide, architecture-level, verification-system-level, or harness-level.
+- Plan features as relatively closed loops of user-visible or system-verifiable progress, not as scattered representative tasks.
+- Capture dependencies, rollout breadth, verification boundaries, and acceptance boundaries in the feature descriptions and notes.
+- Prefer a plan that leaves later coding loops with one main feature at a time, while keeping remaining rollout work explicit until it is actually complete.
 - Create a non-empty feature_list.json at FEATURE_LIST_PATH.
 - Create or initialize progress.txt at PROGRESS_PATH.
 - feature_list.json is the only source of truth for completion.
@@ -33,6 +37,7 @@ Requirements:
   - passes: boolean
   - notes: string
 - During planning, initialize every passes value to false.
+- Avoid plans that let a large task look complete after only one representative patch or partial rollout.
 - Example feature_list.json:
   [
     {
@@ -55,6 +60,10 @@ Requirements:
 - feature_list.json is the only source of truth for completion.
 - Do not remove existing features.
 - Do not change any feature passes value from true back to false.
+- Default each coding loop to one main feature from FEATURE_LIST_PATH, or at most a very small cluster of tightly related tasks required to finish that feature safely.
+- Before editing code, choose the verification path for that feature and keep implementation aligned with it.
+- Prefer finishing one slice thoroughly instead of touching multiple planned features shallowly.
+- When broader rollout work remains, keep those features explicit in FEATURE_LIST_PATH with passes=false and notes describing what is still missing.
 - FEATURE_LIST_PATH and PROGRESS_PATH are outside WORKDIR_PATH. Do not use apply_patch with absolute paths for them.
 - Update FEATURE_LIST_PATH and PROGRESS_PATH via shell commands or another file-writing method that works with absolute paths.
 - FEATURE_LIST_PATH must remain a JSON array whose items use exactly these fields: id, title, description, priority, passes, notes.

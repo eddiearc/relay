@@ -134,6 +134,13 @@ Targeted commands:
 
 Use the smallest loop first, then widen proof before you ship.
 
+For harness-prompt or execution-policy changes, keep the same ordering discipline explicit in both docs and prompts:
+
+1. pick the narrowest repository-native proof that directly covers the edited behavior
+2. widen to `go test ./...` before handoff
+3. finish with the smallest real `go run ./cmd/relay ...` commands that exercise the changed CLI surface
+4. use `relay-e2e` only when the scenario can prove the intended end state instead of approximating it
+
 ### Fast local iteration
 
 Start with the narrowest package test that proves the change you just made.
@@ -182,9 +189,11 @@ If you intentionally change snapshot-protected output, refresh the goldens first
 
 I evaluated the repo-level `relay-e2e` layer for this work and did not extend it.
 
-Reason: the bundled `e2e/` scenarios validate Relay operating on a target repository through `relay serve --once` and an independent verification pass. That is useful for orchestration smoke coverage, but this Phase 2 work primarily broadens Relay's own repository-native verification layers: stable CLI goldens, subprocess command coverage, persisted `issue.json` contract fixtures, and contributor workflow documentation. Those need exact assertions on help text, `status` and `report` output, stdout/stderr splits, and fixture schema drift, so direct tests in `internal/cli` and `internal/relay` are the more accurate proof.
+Reason: the bundled `e2e/` scenarios validate Relay operating on a target repository through `relay serve --once` and an independent verification pass. That is useful for orchestration smoke coverage, but this prompt-split work needs proof about Relay's own execution philosophy: broader phased planning, narrower coding loops, and explicit unfinished scope in `feature_list.json`. The current shared `relay-e2e` skill still declares failure unless the issue reaches `done` and every feature passes, so it cannot yet grade the healthy intermediate state where one coding loop lands one slice and deliberately leaves later features pending.
 
-Current gap: Relay still does not have a repository-level scenario that self-hosts these exact CLI verification layers end to end. For now, treat `relay-e2e` as complementary orchestration smoke coverage, not as a replacement for the repository-native layers above.
+That makes `relay-e2e` the wrong acceptance layer for this specific gap today, even though it remains valuable smoke coverage for finished scenarios. For now, use repository-native tests plus real CLI commands as the source of truth, and keep the E2E limitation documented rather than pretending the current harness can express expected-partial completion.
+
+Future viability condition: add a dedicated prompt-split scenario only after the shared E2E contract can encode an expected non-terminal state or otherwise distinguish "correctly unfinished after this loop" from a plain failure.
 
 ## Remaining Phase 3+ Gaps
 

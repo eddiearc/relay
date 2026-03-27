@@ -47,6 +47,35 @@ func TestBuildPromptPlanIncludesArtifactSchemaAndRestrictions(t *testing.T) {
 	}
 }
 
+func TestBuildPromptPlanIncludesPhasedPlanningContract(t *testing.T) {
+	issue := Issue{
+		ID:            "issue-1",
+		PipelineName:  "demo",
+		Goal:          "goal",
+		Description:   "desc",
+		Status:        IssueStatusTodo,
+		ArtifactDir:   "/tmp/state/issues/issue-1",
+		WorkspacePath: "/tmp/workspaces/issue-1",
+		WorkdirPath:   "/tmp/workspaces/issue-1/repo",
+	}
+
+	prompt := BuildPrompt(issue, "plan", 0, "pipeline prompt")
+
+	for _, needle := range []string{
+		"Default to phased plans when the work is repo-wide, architecture-level, verification-system-level, or harness-level",
+		"Plan features as relatively closed loops of user-visible or system-verifiable progress, not as scattered representative tasks",
+		"Capture dependencies, rollout breadth, verification boundaries, and acceptance boundaries in the feature descriptions and notes",
+		"Prefer a plan that leaves later coding loops with one main feature at a time, while keeping remaining rollout work explicit until it is actually complete",
+	} {
+		if !strings.Contains(prompt, needle) {
+			t.Fatalf("prompt missing %q\n%s", needle, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Keep the plan minimal and dependency-free") {
+		t.Fatalf("prompt should not encourage dependency-free minimal planning by default\n%s", prompt)
+	}
+}
+
 func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 	issue := Issue{
 		ID:            "issue-1",
@@ -65,6 +94,10 @@ func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 		"Do not use apply_patch with absolute paths",
 		"FEATURE_LIST_PATH must remain a JSON array",
 		"Do not change any feature passes value from true back to false",
+		"Default each coding loop to one main feature from FEATURE_LIST_PATH, or at most a very small cluster of tightly related tasks required to finish that feature safely",
+		"Before editing code, choose the verification path for that feature and keep implementation aligned with it",
+		"Prefer finishing one slice thoroughly instead of touching multiple planned features shallowly",
+		"When broader rollout work remains, keep those features explicit in FEATURE_LIST_PATH with passes=false and notes describing what is still missing",
 		"WORKDIR_PATH=/tmp/workspaces/issue-1/repo",
 		"runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning and coding runs for debugging",
 	} {

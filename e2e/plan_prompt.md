@@ -25,6 +25,9 @@ The final implementation must support:
 
 ## Planning Rules
 
+- Prefer a small number of relatively closed-loop features instead of many tiny file-level tasks.
+- State the verification boundary for each feature, even in a small repository.
+- If the task is genuinely small, keep the plan compact, but still make the implementation slice and verification slice explicit.
 - Include at least one feature covering self-verification by the coding agent.
 - Keep the plan minimal and dependency-free.
 - `feature_list.json` must be exactly a JSON array.
