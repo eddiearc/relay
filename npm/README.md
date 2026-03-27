@@ -56,14 +56,14 @@ The publish script is idempotent for an already-published version. It skips pack
 
 ## CI Publishing
 
-Relay now splits release automation into two workflows:
+Relay now uses one official release workflow plus one smoke workflow:
 
 1. `release-policy.yml` evaluates `main` against the latest published release.
 2. It no-ops when `main` is already covered.
-3. It publishes an explicit stable tag on `HEAD` when one exists.
+3. It creates an explicit stable release when `HEAD` already carries one.
 4. Otherwise it creates the next patch release from the latest published tag.
-5. If no published release baseline exists yet, the first release stays explicit/manual.
-6. `release.yml` then builds `dist/*.tar.gz`, runs `npm --prefix npm run prepare-release`, publishes the four platform packages, and publishes `@eddiearc/relay` last.
+5. The same `release-policy.yml` run then builds `dist/*.tar.gz`, runs `npm --prefix npm run prepare-release`, publishes the four platform packages, and publishes `@eddiearc/relay` last.
+6. `release-smoke.yml` remains the packaging-only dry run that validates generated packages without publishing them to npm.
 
 For a workflow-safe dry run, trigger `release-policy.yml` manually with `dry_run=true`. Use `published_release_tag` if you want to simulate a published baseline without creating a real release first.
 
@@ -75,7 +75,7 @@ Preferred:
 2. For each package, configure npm Trusted Publisher to trust:
    - GitHub user or org: `eddiearc`
    - Repository: `relay`
-   - Workflow filename: `release.yml`
+   - Workflow filename: `release-policy.yml`
 3. Keep the workflow permission `id-token: write` enabled.
 4. Publish from GitHub-hosted runners only.
 
@@ -98,7 +98,7 @@ Trusted publishing is now the primary path in CI. Token-based publishing is only
 ## First Publish Checklist
 
 1. Ensure the npm scope `@eddiearc` exists and your publisher account has access.
-2. Configure Trusted Publisher for all five packages using workflow filename `release.yml`.
+2. Configure Trusted Publisher for all five packages using workflow filename `release-policy.yml`.
 3. Publish one release tag such as `v0.1.0`.
 4. Confirm all five packages exist on npm.
 

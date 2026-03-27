@@ -26,6 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      action: ${{ steps.inspect.outputs.action }}
+      tag: ${{ steps.inspect.outputs.tag }}
+      reason: ${{ steps.inspect.outputs.reason }}
+      target_ref: ${{ steps.runtime.outputs.target_ref }}
+      dry_run: ${{ steps.runtime.outputs.dry_run }}
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.sha }}
@@ -43,6 +49,12 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+
+      - name: Record workflow inputs
+        id: runtime
+        run: |
+          echo "target_ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
 
       - name: Fetch tags
         run: git fetch --force --tags origin
@@ -108,3 +120,66 @@ jobs:
       - name: No release required
         if: ${{ steps.inspect.outputs.action == 'noop' }}
         run: echo "No release publication needed for this main commit."
+
+  package:
+    name: Build, upload, and publish release artifacts
+    needs: evaluate
+    if: ${{ needs.evaluate.outputs.dry_run != 'true' && needs.evaluate.outputs.action != 'noop' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_REF: ${{ needs.evaluate.outputs.target_ref }}
+      VERSION: ${{ needs.evaluate.outputs.tag }}
+
+    steps:
+      - name: Check out repository at release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.VERSION }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
+      - name: Run tests
+        run: |
+          make test
+          npm --prefix npm test
+
+      - name: Build release archives
+        run: make package-all VERSION="$VERSION"
+
+      - name: Upload release assets
+        run: gh release upload "$VERSION" dist/*.tar.gz --clobber
+
+      - name: Generate npm packages
+        run: |
+          npm --prefix npm run prepare-release -- \
+            --version "$VERSION" \
+            --dist-dir "$GITHUB_WORKSPACE/dist" \
+            --out-dir "$GITHUB_WORKSPACE/npm/out"
+
+      - name: Publish npm packages
+        env:
+          NODE_AUTH_TOKEN: ""
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm --prefix npm run publish-release -- \
+            --version "$VERSION" \
+            --packages-dir "$GITHUB_WORKSPACE/npm/out"

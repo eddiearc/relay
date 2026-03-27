@@ -17,7 +17,8 @@ test('release smoke workflow creates and cleans up a temporary draft release', (
   assert.match(workflow, /git push origin ":refs\/tags\/\$VERSION"/);
 });
 
-test('release smoke workflow prepares npm packages without publishing them', () => {
-  assert.match(workflow, /npm --prefix npm run prepare-release -- \\/);
-  assert.doesNotMatch(workflow, /npm --prefix npm run publish-release -- \\/);
+test('release smoke workflow prepares npm packages and validates them without publishing', () => {
+  assert.ok(workflow.includes('npm --prefix npm run prepare-release -- \\\n'));
+  assert.match(workflow, /npm pack --dry-run "\$package_dir"/);
+  assert.ok(!workflow.includes('npm --prefix npm run publish-release -- \\\n'));
 });
