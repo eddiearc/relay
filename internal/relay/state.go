@@ -2,10 +2,12 @@ package relay
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -16,6 +18,15 @@ const workspaceRootEnvVar = "RELAY_WORKSPACE_ROOT"
 type Store struct {
 	Root          string
 	WorkspaceRoot string
+}
+
+type DeleteIssueResult struct {
+	IssueID          string
+	ArtifactDir      string
+	WorkspacePath    string
+	ArtifactRemoved  bool
+	WorkspaceRemoved bool
+	Missing          bool
 }
 
 func NewStore(root string) *Store {
@@ -145,6 +156,45 @@ func (s *Store) ListIssues() ([]Issue, error) {
 	return issues, nil
 }
 
+func (s *Store) DeleteIssue(issueID string) (DeleteIssueResult, error) {
+	result := DeleteIssueResult{
+		IssueID:     issueID,
+		ArtifactDir: s.IssueDir(issueID),
+	}
+
+	issue, err := s.LoadIssue(issueID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			removed, removeErr := removeTreeIfPresent(result.ArtifactDir)
+			if removeErr != nil {
+				return result, fmt.Errorf("delete issue artifact dir: %w", removeErr)
+			}
+			result.ArtifactRemoved = removed
+			result.Missing = true
+			return result, nil
+		}
+		return result, err
+	}
+
+	if workspacePath, ok := s.ownedWorkspacePath(issue); ok {
+		result.WorkspacePath = workspacePath
+		removed, removeErr := removeTreeIfPresent(workspacePath)
+		if removeErr != nil {
+			return result, fmt.Errorf("delete workspace: %w", removeErr)
+		}
+		result.WorkspaceRemoved = removed
+	} else if issue.WorkspacePath != "" {
+		result.WorkspacePath = issue.WorkspacePath
+	}
+
+	removed, err := removeTreeIfPresent(result.ArtifactDir)
+	if err != nil {
+		return result, fmt.Errorf("delete issue artifact dir: %w", err)
+	}
+	result.ArtifactRemoved = removed
+	return result, nil
+}
+
 func (s *Store) SavePipeline(pipeline Pipeline) error {
 	if err := pipeline.Normalize(); err != nil {
 		return err
@@ -208,6 +258,60 @@ func writeFileAtomically(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tempPath, path)
+}
+
+func removeTreeIfPresent(path string) (bool, error) {
+	if path == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) ownedWorkspacePath(issue Issue) (string, bool) {
+	if issue.WorkspacePath == "" {
+		return "", false
+	}
+	workspacePath, err := filepath.Abs(issue.WorkspacePath)
+	if err != nil {
+		return "", false
+	}
+	base := filepath.Base(workspacePath)
+	if base != issue.ID && !strings.HasPrefix(base, issue.ID+"-") {
+		return "", false
+	}
+	if issue.WorkdirPath != "" {
+		workdirPath, err := filepath.Abs(issue.WorkdirPath)
+		if err == nil {
+			rel, relErr := filepath.Rel(workspacePath, workdirPath)
+			if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				return workspacePath, true
+			}
+		}
+	}
+	if s.WorkspaceRoot == "" {
+		return "", false
+	}
+	workspaceRoot, err := filepath.Abs(s.WorkspaceRoot)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(workspaceRoot, workspacePath)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return workspacePath, true
 }
 
 func (s *Store) SaveRunLog(issueID, name, stdout, stderr, finalMessage string) error {
