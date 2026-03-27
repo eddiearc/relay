@@ -50,6 +50,60 @@ func TestHelpIncludesVersionCommand(t *testing.T) {
 	}
 }
 
+func TestHelpIncludesReleaseCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	exitCode := run([]string{"help"}, &stdout, io.Discard)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d", exitCode)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("release")) {
+		t.Fatalf("expected help output to include release command, got %s", stdout.String())
+	}
+}
+
+func TestReleaseInspectPrintsDecision(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "user.name", "Relay Test")
+	git(t, repo, "config", "user.email", "relay@example.com")
+	writeAndCommit(t, repo, "base.txt", "base\n")
+	git(t, repo, "tag", "v1.2.3")
+	writeAndCommit(t, repo, "feature.txt", "feature\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"release", "inspect", "--repo", repo, "--main-ref", "HEAD", "--published-release-tag", "v1.2.3"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"action=auto-cut-patch", "tag=v1.2.4", "reason="} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected output to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func git(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func writeAndCommit(t *testing.T, repo, name, content string) {
+	t.Helper()
+	path := filepath.Join(repo, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	git(t, repo, "add", name)
+	git(t, repo, "commit", "-m", strings.TrimSuffix(name, filepath.Ext(name)))
+}
+
 func TestHelpIncludesUpgradeCommand(t *testing.T) {
 	var stdout bytes.Buffer
 	exitCode := run([]string{"help"}, &stdout, io.Discard)

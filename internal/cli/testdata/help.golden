@@ -6,14 +6,16 @@ Usage:
 
 Workflow:
   1. relay help
-  2. relay version
-  3. relay upgrade --check
-  4. relay help pipeline
-  5. relay help issue
-  6. relay serve --once
+  2. relay help release
+  3. relay version
+  4. relay upgrade --check
+  5. relay help pipeline
+  6. relay help issue
+  7. relay serve --once
 
 Examples:
   relay help
+  relay release inspect --repo . --published-release-tag v0.2.1
   relay version
   relay upgrade --check
   relay pipeline import -file pipeline.yaml
@@ -32,6 +34,7 @@ Commands:
   status   Show saved issue status
   report   Print a saved issue report
   kill     Mark a saved issue as failed
+  release  Inspect repository release decisions
   upgrade  Upgrade the relay CLI
   version  Show build version information
   help     Show detailed help for a command or subcommand
@@ -39,6 +42,7 @@ Commands:
 More help:
   relay help serve
   relay help watch
+  relay help release
   relay help pipeline add
   relay help pipeline show
   relay help pipeline template

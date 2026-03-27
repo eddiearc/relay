@@ -398,15 +398,16 @@ npm --prefix npm run publish-release -- \
   --packages-dir "$PWD/npm/out"
 ```
 
-Versioning is controlled by git tags in CI. The GitHub Actions workflow:
+Versioning is controlled by CI release policy plus git tags. Relay now uses two GitHub Actions workflows:
 
-- reuses the local `Makefile`, so CI and local packaging stay aligned
-- runs only when a GitHub Release is published
-- runs `make test`
-- runs `make package-all VERSION=<release-tag>`
-- uploads `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` archives to that release
-- generates npm packages from those release archives
-- publishes the four platform packages first, then publishes `@eddiearc/relay`
+- `release-policy.yml` runs on pushes to `main` and on manual `workflow_dispatch`
+- it inspects the latest published release tag that still reaches `main`
+- if `main` is already covered by that published release, it does nothing
+- if `HEAD` already has an explicit stable tag such as `v1.3.0`, it publishes that tag first
+- otherwise it derives the next patch tag from the latest published release and publishes that release
+- if there is no published release baseline yet, the first release stays explicit/manual
+- `release.yml` still handles packaging after a GitHub Release is published
+- `release.yml` reuses the local `Makefile`, runs `make test`, builds all archives, uploads them, and then publishes npm packages in platform-first order
 
 If you want a local build with explicit version metadata, use:
 
@@ -414,17 +415,28 @@ If you want a local build with explicit version metadata, use:
 make package VERSION=v0.1.0
 ```
 
-To trigger packaging in GitHub, publish a release for a tag such as `v0.1.0`. For example:
+To inspect the policy locally against the current repository state, run:
+
+```bash
+go run ./cmd/relay release inspect \
+  --repo . \
+  --main-ref HEAD \
+  --published-release-tag v0.1.0
+```
+
+The inspect command prints the chosen action (`noop`, `publish-explicit-tag`, or `auto-cut-patch`), the selected tag when one is needed, and the reason.
+
+To trigger packaging in GitHub with an explicit release tag such as `v0.1.0`, publish a release for that tag. For example:
 
 ```bash
 gh release create v0.1.0 --generate-notes
 ```
 
-If you want to smoke-test the release pipeline before publishing a real version, run the `Release Smoke Test` workflow from the Actions tab. It creates a temporary draft release tag like `v0.0.0-smoke.<run_id>`, uploads the platform archives, generates the npm packages, validates them with `npm pack --dry-run`, and then deletes the temporary release and tag.
+If you want to validate the policy without publishing anything, run the `Release Policy` workflow manually with `dry_run=true`. You can also set `published_release_tag` to simulate a published baseline without creating a real release first. For packaging-only validation, the `Release Smoke Test` workflow still creates a temporary draft release tag like `v0.0.0-smoke.<run_id>`, uploads the platform archives, generates the npm packages, validates them with `npm pack --dry-run`, and then deletes the temporary release and tag.
 
 For the npm package layout and registry setup, see [`npm/README.md`](./npm/README.md).
 
-The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The release workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release.yml`.
+The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The packaging workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release.yml`.
 
 Windows packages are not published yet because the current runtime assumes Unix tools such as `zsh` and `SIGKILL`.
 

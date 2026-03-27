@@ -175,6 +175,15 @@ go run ./cmd/relay help report
 
 If you changed status/report behavior against temp Relay state, also run a matching local command flow or keep the subprocess test focused on that path.
 
+For release policy work, add a real inspect command over a temporary git repository or the current checkout.
+
+```bash
+go test ./internal/release ./internal/cli
+go run ./cmd/relay release inspect --repo . --main-ref HEAD --published-release-tag v0.2.1
+```
+
+The release-policy workflow itself is validated with repository-native workflow tests plus the inspect command. True end-to-end GitHub release publication is still only approximated locally because publishing a real GitHub Release is a hosted side effect, not a repository-local assertion.
+
 If you intentionally change snapshot-protected output, refresh the goldens first, review the snapshot diff, and then rerun `go test ./internal/cli -run TestCommandOutputGolden` without `-update`.
 
 ## Where Each Change Belongs
