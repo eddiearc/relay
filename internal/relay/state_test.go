@@ -8,6 +8,192 @@ import (
 	"time"
 )
 
+func TestStoreDeleteIssueRemovesOnlyTargetedIssueState(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	issueOne := Issue{
+		ID:           "issue-delete-one",
+		PipelineName: "demo",
+		Goal:         "delete one",
+		Description:  "desc",
+		Status:       IssueStatusInterrupted,
+		WorkspacePath: filepath.Join(store.WorkspaceRoot,
+			"issue-delete-one-1234abcd"),
+		WorkdirPath: filepath.Join(store.WorkspaceRoot, "issue-delete-one-1234abcd", "repo"),
+	}
+	issueTwo := Issue{
+		ID:           "issue-delete-two",
+		PipelineName: "demo",
+		Goal:         "keep two",
+		Description:  "desc",
+		Status:       IssueStatusDone,
+		WorkspacePath: filepath.Join(store.WorkspaceRoot,
+			"issue-delete-two-5678efgh"),
+		WorkdirPath: filepath.Join(store.WorkspaceRoot, "issue-delete-two-5678efgh", "repo"),
+	}
+	for _, issue := range []Issue{issueOne, issueTwo} {
+		if err := store.SaveIssue(issue); err != nil {
+			t.Fatalf("SaveIssue(%s): %v", issue.ID, err)
+		}
+		if err := os.MkdirAll(issue.WorkdirPath, 0o755); err != nil {
+			t.Fatalf("mkdir workdir for %s: %v", issue.ID, err)
+		}
+		if err := os.WriteFile(FeatureListPath(store.IssueDir(issue.ID)), []byte("[]\n"), 0o644); err != nil {
+			t.Fatalf("write feature list for %s: %v", issue.ID, err)
+		}
+		if err := os.WriteFile(ProgressPath(store.IssueDir(issue.ID)), []byte("progress\n"), 0o644); err != nil {
+			t.Fatalf("write progress for %s: %v", issue.ID, err)
+		}
+	}
+
+	result, err := store.DeleteIssue(issueOne.ID)
+	if err != nil {
+		t.Fatalf("DeleteIssue: %v", err)
+	}
+	if !result.ArtifactRemoved {
+		t.Fatalf("expected artifact dir removal, got %+v", result)
+	}
+	if !result.WorkspaceRemoved {
+		t.Fatalf("expected workspace removal, got %+v", result)
+	}
+	if _, err := os.Stat(store.IssueDir(issueOne.ID)); !os.IsNotExist(err) {
+		t.Fatalf("expected issue one artifact dir removed, err=%v", err)
+	}
+	if _, err := os.Stat(issueOne.WorkspacePath); !os.IsNotExist(err) {
+		t.Fatalf("expected issue one workspace removed, err=%v", err)
+	}
+	if _, err := store.LoadIssue(issueTwo.ID); err != nil {
+		t.Fatalf("expected issue two to remain loadable: %v", err)
+	}
+	if _, err := os.Stat(store.IssueDir(issueTwo.ID)); err != nil {
+		t.Fatalf("expected issue two artifact dir to remain: %v", err)
+	}
+	if _, err := os.Stat(issueTwo.WorkspacePath); err != nil {
+		t.Fatalf("expected issue two workspace to remain: %v", err)
+	}
+}
+
+func TestStoreDeleteIssueIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	issue := Issue{
+		ID:            "issue-delete-idempotent",
+		PipelineName:  "demo",
+		Goal:          "delete twice",
+		Description:   "desc",
+		Status:        IssueStatusInterrupted,
+		WorkspacePath: filepath.Join(store.WorkspaceRoot, "issue-delete-idempotent-a1b2c3d4"),
+	}
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue: %v", err)
+	}
+	if err := os.MkdirAll(issue.WorkspacePath, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	first, err := store.DeleteIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("first DeleteIssue: %v", err)
+	}
+	if first.Missing {
+		t.Fatalf("expected first delete to see persisted issue, got %+v", first)
+	}
+
+	second, err := store.DeleteIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("second DeleteIssue: %v", err)
+	}
+	if !second.Missing {
+		t.Fatalf("expected second delete to report missing issue state, got %+v", second)
+	}
+	if _, err := os.Stat(store.IssueDir(issue.ID)); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact dir to stay removed, err=%v", err)
+	}
+	if _, err := os.Stat(issue.WorkspacePath); !os.IsNotExist(err) {
+		t.Fatalf("expected workspace to stay removed, err=%v", err)
+	}
+}
+
+func TestStoreDeleteIssueLeavesExternalWorkspaceUntouched(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	externalWorkspace := filepath.Join(t.TempDir(), "issue-delete-external-unsafe")
+	if err := os.MkdirAll(externalWorkspace, 0o755); err != nil {
+		t.Fatalf("mkdir external workspace: %v", err)
+	}
+	issue := Issue{
+		ID:            "issue-delete-external",
+		PipelineName:  "demo",
+		Goal:          "delete safely",
+		Description:   "desc",
+		Status:        IssueStatusDone,
+		WorkspacePath: externalWorkspace,
+	}
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue: %v", err)
+	}
+
+	result, err := store.DeleteIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("DeleteIssue: %v", err)
+	}
+	if result.WorkspaceRemoved {
+		t.Fatalf("expected external workspace to be preserved, got %+v", result)
+	}
+	if _, err := os.Stat(externalWorkspace); err != nil {
+		t.Fatalf("expected external workspace to remain: %v", err)
+	}
+	if _, err := os.Stat(store.IssueDir(issue.ID)); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact dir removed, err=%v", err)
+	}
+}
+
+func TestStoreDeleteIssueRemovesStrayArtifactDirWhenIssueFileMissing(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	artifactDir := store.IssueDir("issue-missing-snapshot")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "events.log"), []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write events.log: %v", err)
+	}
+
+	result, err := store.DeleteIssue("issue-missing-snapshot")
+	if err != nil {
+		t.Fatalf("DeleteIssue: %v", err)
+	}
+	if !result.Missing {
+		t.Fatalf("expected missing issue snapshot to be reported, got %+v", result)
+	}
+	if !result.ArtifactRemoved {
+		t.Fatalf("expected stray artifact dir to be removed, got %+v", result)
+	}
+	if _, err := os.Stat(artifactDir); !os.IsNotExist(err) {
+		t.Fatalf("expected stray artifact dir removed, err=%v", err)
+	}
+}
+
 func TestStoreSavesIssuesIntoPerIssueDirectories(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(root)

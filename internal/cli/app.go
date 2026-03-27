@@ -446,12 +446,20 @@ Examples:
   relay issue list
 `
 
-var issueDeleteUsage = `mark an inactive issue as deleted.
+var issueDeleteUsage = `delete an inactive issue and its persisted artifacts.
 
 Usage:
   relay issue delete --id <issue-id> [flags]
 
-The command refuses to delete an active issue.
+What it removes:
+  - the issue artifact directory under ~/.relay/issues/<issue-id>/
+  - issue.json, feature_list.json, progress.txt, events.log, and runs/ inside that directory
+  - the persisted workspace path when it is owned by the issue under the configured workspace root
+
+Safety rules:
+  - the command refuses to delete an active issue
+  - only the targeted issue artifact directory is removed
+  - missing issue files or already-removed artifacts are treated as a no-op cleanup
 
 Examples:
   relay issue delete --id issue-123
@@ -1795,20 +1803,28 @@ func runIssueDelete(args []string, stdout, stderr io.Writer) int {
 	store := relay.NewStore(resolveStateDir(*stateDir))
 	issue, err := store.LoadIssue(*id)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "load issue %q: %v\n", *id, err)
-		return 1
+		if !errors.Is(err, os.ErrNotExist) {
+			_, _ = fmt.Fprintf(stderr, "load issue %q: %v\n", *id, err)
+			return 1
+		}
+		result, deleteErr := store.DeleteIssue(*id)
+		if deleteErr != nil {
+			_, _ = fmt.Fprintf(stderr, "delete issue %q: %v\n", *id, deleteErr)
+			return 1
+		}
+		writeIssueDeleteResult(stdout, result)
+		return 0
 	}
 	if relay.IsIssueActiveStatus(issue.Status) {
 		_, _ = fmt.Fprintf(stderr, "issue %s is running and cannot be deleted\n", issue.ID)
 		return 1
 	}
-	issue.Status = relay.IssueStatusDeleted
-	issue.LastError = "deleted by user"
-	if err := store.SaveIssue(issue); err != nil {
-		_, _ = fmt.Fprintf(stderr, "save issue: %v\n", err)
+	result, err := store.DeleteIssue(issue.ID)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "delete issue %q: %v\n", issue.ID, err)
 		return 1
 	}
-	_ = writeIssue(stdout, issue)
+	writeIssueDeleteResult(stdout, result)
 	return 0
 }
 
@@ -1988,6 +2004,27 @@ func writeIssue(w io.Writer, issue relay.Issue) error {
 	}
 	_, err = fmt.Fprintln(w, string(data))
 	return err
+}
+
+func writeIssueDeleteResult(w io.Writer, result relay.DeleteIssueResult) {
+	_, _ = fmt.Fprintf(w, "issue %s deleted\n", result.IssueID)
+	if result.Missing {
+		_, _ = io.WriteString(w, "persisted issue snapshot already missing; cleanup treated as idempotent\n")
+	}
+	if result.ArtifactRemoved {
+		_, _ = fmt.Fprintf(w, "persisted artifacts removed: %s\n", result.ArtifactDir)
+	} else {
+		_, _ = fmt.Fprintf(w, "persisted artifacts already absent: %s\n", result.ArtifactDir)
+	}
+	if result.WorkspaceRemoved {
+		_, _ = fmt.Fprintf(w, "owned workspace removed: %s\n", result.WorkspacePath)
+		return
+	}
+	if result.WorkspacePath != "" {
+		_, _ = fmt.Fprintf(w, "owned workspace preserved: %s\n", result.WorkspacePath)
+		return
+	}
+	_, _ = io.WriteString(w, "owned workspace removed: none recorded\n")
 }
 
 func resolveStateDir(path string) string {

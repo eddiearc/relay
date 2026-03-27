@@ -1280,6 +1280,109 @@ func TestIssueDeleteFailsWhenRunning(t *testing.T) {
 	}
 }
 
+func TestIssueDeleteHelpMentionsArtifactCleanup(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"help", "issue", "delete"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"delete an inactive issue and its persisted artifacts",
+		"feature_list.json",
+		"progress.txt",
+		"workspace path",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected issue delete help to contain %q, got %s", want, output)
+		}
+	}
+}
+
+func TestIssueDeleteRemovesArtifactsAndOwnedWorkspace(t *testing.T) {
+	stateDir := t.TempDir()
+	importTestPipeline(t, stateDir, "demo-delete-cleanup")
+	store := relay.NewStore(stateDir)
+	store.WorkspaceRoot = filepath.Join(stateDir, "relay-workspaces")
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	issue := relay.Issue{
+		ID:            "issue-delete-cleanup",
+		PipelineName:  "demo-delete-cleanup",
+		Goal:          "clean up issue state",
+		Description:   "desc",
+		Status:        relay.IssueStatusInterrupted,
+		WorkspacePath: filepath.Join(store.WorkspaceRoot, "issue-delete-cleanup-a1b2c3d4"),
+		WorkdirPath:   filepath.Join(store.WorkspaceRoot, "issue-delete-cleanup-a1b2c3d4", "repo"),
+	}
+	saveIssueSnapshot(t, stateDir, issue)
+	other := relay.Issue{
+		ID:            "issue-delete-keep",
+		PipelineName:  "demo-delete-cleanup",
+		Goal:          "keep other issue",
+		Description:   "desc",
+		Status:        relay.IssueStatusDone,
+		WorkspacePath: filepath.Join(store.WorkspaceRoot, "issue-delete-keep-e5f6g7h8"),
+	}
+	saveIssueSnapshot(t, stateDir, other)
+
+	if err := os.MkdirAll(issue.WorkdirPath, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	if err := os.WriteFile(relay.FeatureListPath(store.IssueDir(issue.ID)), []byte("[]\n"), 0o644); err != nil {
+		t.Fatalf("write feature_list.json: %v", err)
+	}
+	if err := os.WriteFile(relay.ProgressPath(store.IssueDir(issue.ID)), []byte("done\n"), 0o644); err != nil {
+		t.Fatalf("write progress.txt: %v", err)
+	}
+	if err := os.MkdirAll(other.WorkspacePath, 0o755); err != nil {
+		t.Fatalf("mkdir other workspace: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{"issue", "delete", "--id", issue.ID, "-state-dir", stateDir}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"issue issue-delete-cleanup deleted",
+		"persisted artifacts removed",
+		issue.WorkspacePath,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected delete output to contain %q, got %s", want, output)
+		}
+	}
+	if _, err := os.Stat(store.IssueDir(issue.ID)); !os.IsNotExist(err) {
+		t.Fatalf("expected deleted issue artifact dir removed, err=%v", err)
+	}
+	if _, err := os.Stat(issue.WorkspacePath); !os.IsNotExist(err) {
+		t.Fatalf("expected deleted issue workspace removed, err=%v", err)
+	}
+	if _, err := os.Stat(store.IssueDir(other.ID)); err != nil {
+		t.Fatalf("expected other issue artifact dir to remain: %v", err)
+	}
+	if _, err := os.Stat(other.WorkspacePath); err != nil {
+		t.Fatalf("expected other issue workspace to remain: %v", err)
+	}
+
+	var listOut bytes.Buffer
+	if exitCode := run([]string{"issue", "list", "-state-dir", stateDir}, &listOut, &stderr); exitCode != 0 {
+		t.Fatalf("issue list failed: %s", stderr.String())
+	}
+	if strings.Contains(listOut.String(), issue.ID) {
+		t.Fatalf("expected deleted issue to disappear from list, got %s", listOut.String())
+	}
+	if !strings.Contains(listOut.String(), other.ID) {
+		t.Fatalf("expected other issue to remain listed, got %s", listOut.String())
+	}
+}
+
 func TestIssueInterruptRequestsStopForRunningIssue(t *testing.T) {
 	stateDir := t.TempDir()
 	importTestPipeline(t, stateDir, "demo-running-interrupt")
