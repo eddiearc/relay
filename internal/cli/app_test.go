@@ -1408,7 +1408,7 @@ func TestIssueInterruptRequestsStopForRunningIssue(t *testing.T) {
 	}
 }
 
-func TestRecoverActiveIssuesMarksOrphanedRunsTodo(t *testing.T) {
+func TestRecoverActiveIssuesMarksOrphanedRunsFailed(t *testing.T) {
 	stateDir := t.TempDir()
 	importTestPipeline(t, stateDir, "demo-recover")
 	saveIssueSnapshot(t, stateDir, relay.Issue{
@@ -1430,11 +1430,14 @@ func TestRecoverActiveIssuesMarksOrphanedRunsTodo(t *testing.T) {
 		t.Fatalf("expected 1 recovered issue, got %d", recovered)
 	}
 	issue := loadIssueSnapshot(t, stateDir, "issue-recover")
-	if issue.Status != relay.IssueStatusTodo {
-		t.Fatalf("expected todo after recovery, got %q", issue.Status)
+	if issue.Status != relay.IssueStatusFailed {
+		t.Fatalf("expected failed after recovery, got %q", issue.Status)
 	}
 	if issue.ActivePhase != "" || len(issue.ActivePIDs) != 0 {
 		t.Fatalf("expected active runtime fields to be cleared, got phase=%q pids=%v", issue.ActivePhase, issue.ActivePIDs)
+	}
+	if !strings.Contains(issue.LastError, "serve restarted") {
+		t.Fatalf("expected recovery error to mention service restart, got %q", issue.LastError)
 	}
 }
 

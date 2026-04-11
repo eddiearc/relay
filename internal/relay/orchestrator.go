@@ -34,9 +34,9 @@ type RunningTask struct {
 
 func NewOrchestrator(store *Store, shell ShellRunner, runner AgentRunner) *Orchestrator {
 	return &Orchestrator{
-		Store:  store,
-		Shell:  shell,
-		Runner: runner,
+		Store:   store,
+		Shell:   shell,
+		Runner:  runner,
 		running: map[string]*RunningTask{},
 	}
 }
@@ -86,7 +86,7 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 	} else if stopped {
 		return latest, nil
 	} else {
-	issue = latest
+		issue = latest
 	}
 
 	workdirPath, err := resolveWorkdirPath(workspacePath, initResult.FinalDir)
@@ -168,12 +168,13 @@ func (o *Orchestrator) runPlanning(ctx context.Context, pipeline Pipeline, issue
 	_ = o.Store.AppendEvent(issue.ID, "planning started")
 	prompt := BuildPrompt(*issue, "plan", 0, pipeline.PlanPrompt)
 	_, err = o.Runner.Run(ctx, AgentRunRequest{
-		Phase:   "plan",
-		Workdir: issue.WorkdirPath,
-		Prompt:  prompt,
-		IssueID: issue.ID,
-		LoopID:  "plan",
-		LogDir:  o.Store.RunDir(issue.ID),
+		Phase:       "plan",
+		Workdir:     issue.WorkdirPath,
+		ArtifactDir: issue.ArtifactDir,
+		Prompt:      prompt,
+		IssueID:     issue.ID,
+		LoopID:      "plan",
+		LogDir:      o.Store.RunDir(issue.ID),
 		OnPID: func(pid int) {
 			o.trackIssuePID(issue, "plan", pid)
 		},
@@ -215,12 +216,13 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	prompt := BuildPrompt(*issue, "coding", loop, pipeline.CodingPrompt) + TailContext(issue.ArtifactDir)
 	loopID := fmt.Sprintf("loop-%02d", loop)
 	_, err = o.Runner.Run(ctx, AgentRunRequest{
-		Phase:   "coding",
-		Workdir: issue.WorkdirPath,
-		Prompt:  prompt,
-		IssueID: issue.ID,
-		LoopID:  loopID,
-		LogDir:  o.Store.RunDir(issue.ID),
+		Phase:       "coding",
+		Workdir:     issue.WorkdirPath,
+		ArtifactDir: issue.ArtifactDir,
+		Prompt:      prompt,
+		IssueID:     issue.ID,
+		LoopID:      loopID,
+		LogDir:      o.Store.RunDir(issue.ID),
 		OnPID: func(pid int) {
 			o.trackIssuePID(issue, "coding", pid)
 		},

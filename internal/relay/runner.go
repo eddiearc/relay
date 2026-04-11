@@ -13,13 +13,14 @@ import (
 )
 
 type AgentRunRequest struct {
-	Phase   string
-	Workdir string
-	Prompt  string
-	IssueID string
-	LoopID  string
-	LogDir  string
-	OnPID   func(pid int)
+	Phase       string
+	Workdir     string
+	ArtifactDir string
+	Prompt      string
+	IssueID     string
+	LoopID      string
+	LogDir      string
+	OnPID       func(pid int)
 }
 
 type AgentRunResult struct {
@@ -136,7 +137,10 @@ func (r ClaudeRunner) Run(ctx context.Context, req AgentRunRequest) (AgentRunRes
 	}
 
 	args := append([]string{}, spec.Args...)
-	args = append(args, "-p", "--dangerously-skip-permissions", "--output-format", "text")
+	args = append(args, "-p", "--dangerously-skip-permissions", "--permission-mode", "bypassPermissions", "--output-format", "text")
+	if req.ArtifactDir != "" {
+		args = append(args, "--add-dir", req.ArtifactDir)
+	}
 
 	cmd := exec.CommandContext(ctx, spec.Command, args...)
 	if req.Workdir != "" {
