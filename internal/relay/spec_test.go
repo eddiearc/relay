@@ -29,6 +29,7 @@ func TestPipelineNormalizeDefaults(t *testing.T) {
 		InitCommand:  "git init repo",
 		PlanPrompt:   "plan",
 		CodingPrompt: "code",
+		VerifyPrompt: "verify",
 	}
 	if err := pipeline.Normalize(); err != nil {
 		t.Fatalf("Normalize: %v", err)
@@ -85,6 +86,7 @@ func TestPipelineNormalizeAcceptsAgentRunnerValues(t *testing.T) {
 				LoopNum:      2,
 				PlanPrompt:   "plan",
 				CodingPrompt: "code",
+				VerifyPrompt: "verify",
 				AgentRunner:  value,
 			}
 			if err := pipeline.Normalize(); err != nil {
@@ -101,6 +103,7 @@ func TestPipelineNormalizeRejectsInvalidAgentRunner(t *testing.T) {
 		LoopNum:      2,
 		PlanPrompt:   "plan",
 		CodingPrompt: "code",
+		VerifyPrompt: "verify",
 		AgentRunner:  "cursor",
 	}
 	err := pipeline.Normalize()
@@ -114,12 +117,13 @@ func TestPipelineNormalizeRejectsInvalidAgentRunner(t *testing.T) {
 
 func TestLoadPipelineRejectsInvalidAgentRunner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pipeline.yaml")
-	data := `name: demo
+data := `name: demo
 init_command: git clone repo .
 loop_num: 2
 agent_runner: cursor
 plan_prompt: plan
 coding_prompt: code
+verify_prompt: verify
 `
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatalf("write pipeline: %v", err)
@@ -131,6 +135,44 @@ coding_prompt: code
 	}
 	if !strings.Contains(err.Error(), "pipeline.agent_runner") {
 		t.Fatalf("expected error to mention pipeline.agent_runner, got %v", err)
+	}
+}
+
+func TestPipelineNormalizeRequiresVerifyPrompt(t *testing.T) {
+	pipeline := Pipeline{
+		Name:         "demo",
+		InitCommand:  "git init repo",
+		LoopNum:      2,
+		PlanPrompt:   "plan",
+		CodingPrompt: "code",
+	}
+	err := pipeline.Normalize()
+	if err == nil {
+		t.Fatal("expected missing verify prompt to fail")
+	}
+	if !strings.Contains(err.Error(), "pipeline.verify_prompt") {
+		t.Fatalf("expected verify prompt error, got %v", err)
+	}
+}
+
+func TestLoadPipelineRequiresVerifyPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pipeline.yaml")
+	data := `name: demo
+init_command: git clone repo .
+loop_num: 2
+plan_prompt: plan
+coding_prompt: code
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+
+	_, err := LoadPipeline(path)
+	if err == nil {
+		t.Fatal("expected missing verify_prompt to fail")
+	}
+	if !strings.Contains(err.Error(), "pipeline.verify_prompt") {
+		t.Fatalf("expected error to mention pipeline.verify_prompt, got %v", err)
 	}
 }
 
@@ -197,5 +239,38 @@ func TestIssueTemplateJSONPreservesAgentRunner(t *testing.T) {
 	}
 	if !strings.Contains(issue.TemplateJSON(), `"agent_runner": "claude"`) {
 		t.Fatalf("expected TemplateJSON to include agent_runner, got %s", issue.TemplateJSON())
+	}
+}
+
+func TestValidateFeatureProgressUpdateRejectsCodingPassPromotion(t *testing.T) {
+	before := []FeatureItem{
+		{ID: "F-1", Title: "first", Description: "desc", Priority: 1, Passes: false},
+	}
+	after := []FeatureItem{
+		{ID: "F-1", Title: "first", Description: "desc", Priority: 1, Passes: true},
+	}
+	err := ValidateFeatureProgressUpdate(before, after)
+	if err == nil {
+		t.Fatal("expected coding pass promotion to fail")
+	}
+	if !strings.Contains(err.Error(), "must not change passes") {
+		t.Fatalf("expected pass promotion error, got %v", err)
+	}
+}
+
+func TestApplyVerifiedFeaturesPromotesOnlyRequestedItems(t *testing.T) {
+	items := []FeatureItem{
+		{ID: "F-1", Title: "first", Description: "desc", Priority: 1, Passes: false},
+		{ID: "F-2", Title: "second", Description: "desc", Priority: 2, Passes: false},
+	}
+	updated, err := ApplyVerifiedFeatures(items, []string{"F-2"})
+	if err != nil {
+		t.Fatalf("ApplyVerifiedFeatures: %v", err)
+	}
+	if updated[0].Passes {
+		t.Fatalf("expected F-1 to remain pending")
+	}
+	if !updated[1].Passes {
+		t.Fatalf("expected F-2 to be marked passed")
 	}
 }

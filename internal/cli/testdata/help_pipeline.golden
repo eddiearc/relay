@@ -33,5 +33,5 @@ Examples:
   relay pipeline template
   relay pipeline import -file pipeline.yaml
   relay pipeline show demo
-  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md --verify-prompt-file verify.md
   relay pipeline edit demo --loop-num 15 --agent-runner codex

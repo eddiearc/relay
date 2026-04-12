@@ -264,6 +264,7 @@ func TestStoreSavesPipelineAsYAML(t *testing.T) {
 		LoopNum:      2,
 		PlanPrompt:   "plan",
 		CodingPrompt: "code",
+		VerifyPrompt: "verify",
 	}); err != nil {
 		t.Fatalf("SavePipeline: %v", err)
 	}
@@ -287,6 +288,7 @@ func TestStoreSavesPipelineAgentRunnerToYAML(t *testing.T) {
 		LoopNum:      2,
 		PlanPrompt:   "plan",
 		CodingPrompt: "code",
+		VerifyPrompt: "verify",
 		AgentRunner:  AgentRunnerClaude,
 	}); err != nil {
 		t.Fatalf("SavePipeline: %v", err)

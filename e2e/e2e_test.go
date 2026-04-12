@@ -149,6 +149,7 @@ func runTodoWorkflowWithRunners(t *testing.T, stateDir, workspaceRoot, pipelineR
 
 	planPrompt := writeTempFile(t, "plan.md", realPlanPrompt)
 	codingPrompt := writeTempFile(t, "coding.md", realCodingPrompt)
+	verifyPrompt := writeTempFile(t, "verify.md", realVerifyPrompt)
 
 	pipelineArgs := []string{
 		"pipeline", "add",
@@ -156,6 +157,7 @@ func runTodoWorkflowWithRunners(t *testing.T, stateDir, workspaceRoot, pipelineR
 		"--loop-num", "1",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
+		"--verify-prompt-file", verifyPrompt,
 		"-state-dir", stateDir,
 	}
 	if pipelineRunner != "" {
@@ -221,6 +223,9 @@ func runTodoWorkflowWithRunners(t *testing.T, stateDir, workspaceRoot, pipelineR
 	if _, err := os.Stat(relay.ProgressPath(issue.ArtifactDir)); err != nil {
 		t.Fatalf("progress.txt missing: %v", err)
 	}
+	if _, err := os.Stat(relay.VerifyResultPath(issue.ArtifactDir)); err != nil {
+		t.Fatalf("verify_result.json missing: %v", err)
+	}
 
 	addOutput := runCommand(t, issue.WorkdirPath, "go", "run", ".", "add", "buy-milk")
 	if strings.TrimSpace(addOutput) != "added: buy-milk" {
@@ -279,11 +284,22 @@ func (f *fakeEndToEndRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "ok", "", "done")
 		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "FEATURE_LIST_PATH="))
 		writeFeatureList(tHelper{f.t}, artifactDir, []relay.FeatureItem{
-			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: true},
-			{ID: "F-2", Title: "list todos", Description: "print stored todo items in order", Priority: 2, Passes: true},
+			{ID: "F-1", Title: "persist todos", Description: "store todo items in todos.txt when adding", Priority: 1, Passes: false},
+			{ID: "F-2", Title: "list todos", Description: "print stored todo items in order", Priority: 2, Passes: false},
 		})
 		appendProgress(tHelper{f.t}, artifactDir, "loop 1 complete")
 		updateTodoCLIRepo(f.t, req.Workdir)
+	case "verify":
+		writeRunOutputs(tHelper{f.t}, req.LogDir, req.LoopID, "verified", "", "verified")
+		artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "VERIFY_RESULT_PATH="))
+		writeVerifyResult(tHelper{f.t}, artifactDir, relay.VerifyResult{
+			Loop:             1,
+			Passed:           true,
+			Summary:          "todo app verified",
+			ChecksRun:        []string{"go run . add buy-milk", "go run . list"},
+			Failures:         []string{},
+			PassedFeatureIDs: []string{"F-1", "F-2"},
+		})
 	default:
 		f.t.Fatalf("unexpected phase %q", req.Phase)
 	}
@@ -362,6 +378,20 @@ func appendProgress(t tHelper, artifactDir, text string) {
 	defer file.Close()
 	if _, err := file.WriteString(text + "\n"); err != nil {
 		t.Fatalf("append progress: %v", err)
+	}
+}
+
+func writeVerifyResult(t tHelper, artifactDir string, result relay.VerifyResult) {
+	t.Helper()
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal verify result: %v", err)
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(relay.VerifyResultPath(artifactDir), data, 0o644); err != nil {
+		t.Fatalf("write verify result: %v", err)
 	}
 }
 
@@ -523,6 +553,7 @@ func runFailingWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 
 	planPrompt := writeTempFile(t, "plan.md", realPlanPrompt)
 	codingPrompt := writeTempFile(t, "coding.md", realCodingPrompt)
+	verifyPrompt := writeTempFile(t, "verify.md", realVerifyPrompt)
 
 	var stderr bytes.Buffer
 	if exitCode := cli.RunWithIO([]string{
@@ -531,6 +562,7 @@ func runFailingWorkflow(t *testing.T, stateDir, workspaceRoot string) {
 		"--loop-num", "1",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
+		"--verify-prompt-file", verifyPrompt,
 		"-state-dir", stateDir,
 		"todo-e2e-failed",
 	}, io.Discard, &stderr); exitCode != 0 {
@@ -604,4 +636,13 @@ Requirements:
 - update FEATURE_LIST_PATH to reflect actual completion
 - append a summary to PROGRESS_PATH
 - commit repository changes before finishing
+`
+
+const realVerifyPrompt = `Verify the current TODO CLI from WORKDIR_PATH.
+
+Requirements:
+- run real commands against the current repo state
+- do not trust the coding phase summary
+- write VERIFY_RESULT_PATH as JSON
+- set passed=true only if both add and list behavior work end-to-end
 `

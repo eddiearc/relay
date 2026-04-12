@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,7 @@ func TestOrchestratorCompletesIssueFromIssueArtifacts(t *testing.T) {
 			func(req AgentRunRequest) {
 				artifactDir := mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH=")
 				writeFeatureList(t, filepath.Dir(artifactDir), []FeatureItem{
-					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, filepath.Dir(artifactDir), "loop 1 complete")
@@ -49,10 +50,34 @@ func TestOrchestratorCompletesIssueFromIssueArtifacts(t *testing.T) {
 				artifactDir := mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH=")
 				writeFeatureList(t, filepath.Dir(artifactDir), []FeatureItem{
 					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
-					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
+					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, filepath.Dir(artifactDir), "loop 2 complete")
 				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
+			},
+		},
+		verify: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "VERIFY_RESULT_PATH="))
+				writeVerifyResult(t, artifactDir, VerifyResult{
+					Loop:             1,
+					Passed:           true,
+					Summary:          "loop 1 passed verification",
+					ChecksRun:        []string{"go test ./..."},
+					Failures:         []string{},
+					PassedFeatureIDs: []string{"F-1"},
+				})
+			},
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "VERIFY_RESULT_PATH="))
+				writeVerifyResult(t, artifactDir, VerifyResult{
+					Loop:             2,
+					Passed:           true,
+					Summary:          "loop 2 passed verification",
+					ChecksRun:        []string{"go test ./...", "go run ./cmd/relay help"},
+					Failures:         []string{},
+					PassedFeatureIDs: []string{"F-2"},
+				})
 			},
 		},
 	})
@@ -167,6 +192,193 @@ func TestOrchestratorFailsWhenPlanningDoesNotWriteArtifacts(t *testing.T) {
 	}
 }
 
+func TestOrchestratorAdvancesToNextLoopWhenEvaluationFails(t *testing.T) {
+	requireGit(t)
+
+	root := t.TempDir()
+	store := NewStore(filepath.Join(root, ".relay"))
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	pipeline, issue := testRunInput()
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	orchestrator := NewOrchestrator(store, ZshRunner{}, &fakeAgentRunner{
+		t: t,
+		plan: func(req AgentRunRequest) {
+			artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+			writeFeatureList(t, artifactDir, []FeatureItem{
+				{ID: "F-1", Title: "first", Description: "finish first slice", Priority: 1, Passes: false},
+				{ID: "F-2", Title: "second", Description: "finish second slice", Priority: 2, Passes: false},
+			})
+			appendProgress(t, artifactDir, "planning complete")
+		},
+		coding: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+				writeFeatureList(t, artifactDir, []FeatureItem{
+					{ID: "F-1", Title: "first", Description: "finish first slice", Priority: 1, Passes: false},
+					{ID: "F-2", Title: "second", Description: "finish second slice", Priority: 2, Passes: false},
+				})
+				appendProgress(t, artifactDir, "loop 1 complete")
+				writeRepoChangeAndCommit(t, req.Workdir, "first.txt", "loop 1\n", "feat: first")
+			},
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+				writeFeatureList(t, artifactDir, []FeatureItem{
+					{ID: "F-1", Title: "first", Description: "finish first slice", Priority: 1, Passes: false},
+					{ID: "F-2", Title: "second", Description: "finish second slice", Priority: 2, Passes: false},
+				})
+				appendProgress(t, artifactDir, "loop 2 complete")
+				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: second")
+			},
+		},
+		verify: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "VERIFY_RESULT_PATH="))
+				writeVerifyResult(t, artifactDir, VerifyResult{
+					Loop:             1,
+					Passed:           false,
+					Summary:          "first verification failed",
+					ChecksRun:        []string{"go test ./..."},
+					Failures:         []string{"smoke check failed"},
+					PassedFeatureIDs: []string{},
+				})
+			},
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "VERIFY_RESULT_PATH="))
+				writeVerifyResult(t, artifactDir, VerifyResult{
+					Loop:             2,
+					Passed:           true,
+					Summary:          "second verification passed",
+					ChecksRun:        []string{"go test ./..."},
+					Failures:         []string{},
+					PassedFeatureIDs: []string{"F-1", "F-2"},
+				})
+			},
+		},
+	})
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	issue, err = orchestrator.RunIssue(context.Background(), pipeline, issue)
+	if err != nil {
+		t.Fatalf("RunIssue failed: %v", err)
+	}
+	if issue.Status != IssueStatusDone {
+		t.Fatalf("expected done issue, got %q", issue.Status)
+	}
+	if issue.CurrentLoop != 2 {
+		t.Fatalf("expected second loop after failed evaluation, got %d", issue.CurrentLoop)
+	}
+}
+
+func TestOrchestratorFailsWhenEvaluationDoesNotWriteVerifyResult(t *testing.T) {
+	requireGit(t)
+
+	root := t.TempDir()
+	store := NewStore(filepath.Join(root, ".relay"))
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	pipeline, issue := testRunInput()
+	pipeline.LoopNum = 1
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	orchestrator := NewOrchestrator(store, ZshRunner{}, &fakeAgentRunner{
+		t: t,
+		plan: func(req AgentRunRequest) {
+			artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+			writeFeatureList(t, artifactDir, []FeatureItem{
+				{ID: "F-1", Title: "first", Description: "finish first slice", Priority: 1, Passes: false},
+			})
+			appendProgress(t, artifactDir, "planning complete")
+		},
+		coding: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+				writeFeatureList(t, artifactDir, []FeatureItem{
+					{ID: "F-1", Title: "first", Description: "finish first slice", Priority: 1, Passes: false},
+				})
+				appendProgress(t, artifactDir, "loop 1 complete")
+				writeRepoChangeAndCommit(t, req.Workdir, "first.txt", "loop 1\n", "feat: first")
+			},
+		},
+		verify: []func(AgentRunRequest){
+			func(req AgentRunRequest) {},
+		},
+	})
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	issue, err = orchestrator.RunIssue(context.Background(), pipeline, issue)
+	if err == nil {
+		t.Fatalf("expected failure")
+	}
+	if issue.Status != IssueStatusFailed {
+		t.Fatalf("expected failed issue, got %q", issue.Status)
+	}
+}
+
+func TestOrchestratorRejectsCodingPassPromotionBeforeEvaluation(t *testing.T) {
+	requireGit(t)
+
+	root := t.TempDir()
+	store := NewStore(filepath.Join(root, ".relay"))
+	store.WorkspaceRoot = filepath.Join(root, "relay-workspaces")
+	pipeline, issue := testRunInput()
+	pipeline.LoopNum = 1
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	orchestrator := NewOrchestrator(store, ZshRunner{}, &fakeAgentRunner{
+		t: t,
+		plan: func(req AgentRunRequest) {
+			artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+			writeFeatureList(t, artifactDir, []FeatureItem{
+				{ID: "F-1", Title: "first", Description: "desc", Priority: 1, Passes: false},
+			})
+			appendProgress(t, artifactDir, "planning complete")
+		},
+		coding: []func(AgentRunRequest){
+			func(req AgentRunRequest) {
+				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
+				writeFeatureList(t, artifactDir, []FeatureItem{
+					{ID: "F-1", Title: "first", Description: "desc", Priority: 1, Passes: true},
+				})
+				appendProgress(t, artifactDir, "loop 1 complete")
+				writeRepoChangeAndCommit(t, req.Workdir, "first.txt", "loop 1\n", "feat: first")
+			},
+		},
+	})
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	issue, err = orchestrator.RunIssue(context.Background(), pipeline, issue)
+	if err == nil {
+		t.Fatalf("expected failure")
+	}
+	if issue.Status != IssueStatusFailed {
+		t.Fatalf("expected failed issue, got %q", issue.Status)
+	}
+}
+
 func TestOrchestratorStopsAfterCurrentLoopWhenInterruptRequested(t *testing.T) {
 	requireGit(t)
 
@@ -195,7 +407,7 @@ func TestOrchestratorStopsAfterCurrentLoopWhenInterruptRequested(t *testing.T) {
 			func(req AgentRunRequest) {
 				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
 				writeFeatureList(t, artifactDir, []FeatureItem{
-					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
 					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, artifactDir, "loop 1 complete")
@@ -265,8 +477,8 @@ func TestOrchestratorContinuesAfterCodingLoopError(t *testing.T) {
 			func(req AgentRunRequest) {
 				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
 				writeFeatureList(t, artifactDir, []FeatureItem{
-					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
-					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
+					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, artifactDir, "loop 2 complete")
 				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
@@ -301,7 +513,8 @@ func TestOrchestratorContinuesAfterCodingLoopError(t *testing.T) {
 	for _, needle := range []string{
 		"coding loop=1 failed: runner crashed",
 		"coding loop=1 aborted; advancing to next loop",
-		"coding loop=2 completed done=true",
+		"coding loop=2 completed",
+		"evaluation loop=2 passed",
 		"issue completed loop=2",
 	} {
 		if !strings.Contains(events, needle) {
@@ -343,8 +556,8 @@ func TestOrchestratorContinuesAfterCodingLoopPanic(t *testing.T) {
 			func(req AgentRunRequest) {
 				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
 				writeFeatureList(t, artifactDir, []FeatureItem{
-					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
-					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: true},
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
+					{ID: "F-2", Title: "finish", Description: "finish issue", Priority: 2, Passes: false},
 				})
 				appendProgress(t, artifactDir, "loop 2 complete")
 				writeRepoChangeAndCommit(t, req.Workdir, "second.txt", "loop 2\n", "feat: finish all features")
@@ -375,7 +588,8 @@ func TestOrchestratorContinuesAfterCodingLoopPanic(t *testing.T) {
 	for _, needle := range []string{
 		"coding loop=1 failed: panic: runner panic",
 		"coding loop=1 aborted; advancing to next loop",
-		"coding loop=2 completed done=true",
+		"coding loop=2 completed",
+		"evaluation loop=2 passed",
 	} {
 		if !strings.Contains(events, needle) {
 			t.Fatalf("expected events.log to contain %q, got %s", needle, events)
@@ -427,7 +641,7 @@ func TestOrchestratorTracksRunningIssueRuntime(t *testing.T) {
 
 				artifactDir := filepath.Dir(mustExtractPromptPath(t, req.Prompt, "FEATURE_LIST_PATH="))
 				writeFeatureList(t, artifactDir, []FeatureItem{
-					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: true},
+					{ID: "F-1", Title: "bootstrap", Description: "bootstrap repo", Priority: 1, Passes: false},
 				})
 				appendProgress(t, artifactDir, "loop 1 complete")
 				writeRepoChangeAndCommit(t, req.Workdir, "done.txt", "done\n", "feat: finish feature")
@@ -514,9 +728,12 @@ type fakeAgentRunner struct {
 	t      *testing.T
 	plan   func(req AgentRunRequest)
 	coding []func(req AgentRunRequest)
+	verify []func(req AgentRunRequest)
 	planErr error
 	codingErrs []error
+	verifyErrs []error
 	index  int
+	verifyIndex int
 }
 
 func (f *fakeAgentRunner) Run(_ context.Context, req AgentRunRequest) (AgentRunResult, error) {
@@ -545,6 +762,39 @@ func (f *fakeAgentRunner) Run(_ context.Context, req AgentRunRequest) (AgentRunR
 			err := f.codingErrs[index]
 			return AgentRunResult{}, err
 		}
+	case "verify":
+		if len(f.verify) == 0 {
+			artifactDir := filepath.Dir(mustExtractPromptPath(f.t, req.Prompt, "VERIFY_RESULT_PATH="))
+			items, err := LoadFeatureList(artifactDir)
+			if err != nil {
+				f.t.Fatalf("LoadFeatureList for default verify: %v", err)
+			}
+			var passedIDs []string
+			for _, item := range items {
+				if !item.Passes {
+					passedIDs = append(passedIDs, item.ID)
+				}
+			}
+			writeVerifyResult(f.t, artifactDir, VerifyResult{
+				Loop:             mustLoopIDNumber(f.t, req.LoopID),
+				Passed:           true,
+				Summary:          "default verify success",
+				ChecksRun:        []string{"default verify"},
+				Failures:         []string{},
+				PassedFeatureIDs: passedIDs,
+			})
+			break
+		}
+		if f.verifyIndex >= len(f.verify) {
+			f.t.Fatalf("unexpected verify run %d", f.verifyIndex)
+		}
+		index := f.verifyIndex
+		f.verifyIndex++
+		f.verify[index](req)
+		if index < len(f.verifyErrs) && f.verifyErrs[index] != nil {
+			err := f.verifyErrs[index]
+			return AgentRunResult{}, err
+		}
 	default:
 		f.t.Fatalf("unexpected phase %q", req.Phase)
 	}
@@ -558,6 +808,7 @@ func testRunInput() (Pipeline, Issue) {
 		LoopNum:      3,
 		PlanPrompt:   "plan {{issue}}",
 		CodingPrompt: "code {{issue}}",
+		VerifyPrompt: "verify {{issue}}",
 	}
 	if err := pipeline.Normalize(); err != nil {
 		panic(err)
@@ -599,6 +850,35 @@ func appendProgress(t *testing.T, artifactDir, text string) {
 	if _, err := file.WriteString(text + "\n"); err != nil {
 		t.Fatalf("append progress: %v", err)
 	}
+}
+
+func writeVerifyResult(t *testing.T, artifactDir string, result VerifyResult) {
+	t.Helper()
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal verify result: %v", err)
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(VerifyResultPath(artifactDir), data, 0o644); err != nil {
+		t.Fatalf("write verify result: %v", err)
+	}
+}
+
+func mustLoopIDNumber(t *testing.T, loopID string) int {
+	t.Helper()
+	if loopID == "" || loopID == "plan" {
+		return 0
+	}
+	var loop int
+	for _, pattern := range []string{"loop-%02d", "verify-%02d"} {
+		if _, err := fmt.Sscanf(loopID, pattern, &loop); err == nil {
+			return loop
+		}
+	}
+	t.Fatalf("parse loop id %q: input does not match supported formats", loopID)
+	return 0
 }
 
 func writeRepoChangeAndCommit(t *testing.T, repoPath, fileName, content, message string) {

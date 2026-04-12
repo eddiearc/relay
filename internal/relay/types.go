@@ -32,6 +32,7 @@ type Pipeline struct {
 	LoopNum      int    `json:"loop_num" yaml:"loop_num"`
 	PlanPrompt   string `json:"plan_prompt" yaml:"plan_prompt"`
 	CodingPrompt string `json:"coding_prompt" yaml:"coding_prompt"`
+	VerifyPrompt string `json:"verify_prompt" yaml:"verify_prompt"`
 }
 
 type Issue struct {
@@ -82,6 +83,9 @@ func (p Pipeline) Validate() error {
 	}
 	if p.CodingPrompt == "" {
 		return errors.New("pipeline.coding_prompt is required")
+	}
+	if p.VerifyPrompt == "" {
+		return errors.New("pipeline.verify_prompt is required")
 	}
 	if p.LoopNum <= 0 {
 		return fmt.Errorf("pipeline.loop_num must be positive, got %d", p.LoopNum)

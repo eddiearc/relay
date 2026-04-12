@@ -714,6 +714,7 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 	stateDir := t.TempDir()
 	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
 	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
+	verifyPrompt := writeTempFile(t, "verify.md", "verify {{issue}}")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -724,6 +725,7 @@ func TestPipelineAddSavesYAMLPipeline(t *testing.T) {
 		"--loop-num", "2",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
+		"--verify-prompt-file", verifyPrompt,
 		"-state-dir", stateDir,
 		"demo",
 	}, &stdout, &stderr)
@@ -754,6 +756,7 @@ func TestPipelineAddAutoDetectsRunner(t *testing.T) {
 	stateDir := t.TempDir()
 	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
 	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
+	verifyPrompt := writeTempFile(t, "verify.md", "verify {{issue}}")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -763,6 +766,7 @@ func TestPipelineAddAutoDetectsRunner(t *testing.T) {
 		"--loop-num", "2",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
+		"--verify-prompt-file", verifyPrompt,
 		"-state-dir", stateDir,
 		"demo-detect",
 	}, &stdout, &stderr)
@@ -797,7 +801,8 @@ func TestPipelineImportSavesYAMLPipeline(t *testing.T) {
 		"agent_runner: claude\n"+
 		"loop_num: 2\n"+
 		"plan_prompt: plan {{issue}}\n"+
-		"coding_prompt: code {{issue}}\n")
+		"coding_prompt: code {{issue}}\n"+
+		"verify_prompt: verify {{issue}}\n")
 
 	var stderr bytes.Buffer
 	exitCode := run([]string{"pipeline", "import", "-file", pipelineFile, "-state-dir", stateDir}, io.Discard, &stderr)
@@ -813,6 +818,7 @@ func TestPipelineAddRejectsInvalidAgentRunner(t *testing.T) {
 	stateDir := t.TempDir()
 	planPrompt := writeTempFile(t, "plan.md", "plan {{issue}}")
 	codingPrompt := writeTempFile(t, "coding.md", "code {{issue}}")
+	verifyPrompt := writeTempFile(t, "verify.md", "verify {{issue}}")
 
 	var stderr bytes.Buffer
 	exitCode := run([]string{
@@ -822,6 +828,7 @@ func TestPipelineAddRejectsInvalidAgentRunner(t *testing.T) {
 		"--loop-num", "2",
 		"--plan-prompt-file", planPrompt,
 		"--coding-prompt-file", codingPrompt,
+		"--verify-prompt-file", verifyPrompt,
 		"-state-dir", stateDir,
 		"demo-invalid",
 	}, io.Discard, &stderr)
@@ -1120,6 +1127,7 @@ func TestProcessTodoIssuesResolvesAgentRunnerOrder(t *testing.T) {
 			LoopNum:      1,
 			PlanPrompt:   "plan",
 			CodingPrompt: "code",
+			VerifyPrompt: "verify",
 		},
 		{
 			Name:         "pipe-claude",
@@ -1127,6 +1135,7 @@ func TestProcessTodoIssuesResolvesAgentRunnerOrder(t *testing.T) {
 			LoopNum:      1,
 			PlanPrompt:   "plan",
 			CodingPrompt: "code",
+			VerifyPrompt: "verify",
 			AgentRunner:  relay.AgentRunnerClaude,
 		},
 		{
@@ -1135,6 +1144,7 @@ func TestProcessTodoIssuesResolvesAgentRunnerOrder(t *testing.T) {
 			LoopNum:      1,
 			PlanPrompt:   "plan",
 			CodingPrompt: "code",
+			VerifyPrompt: "verify",
 			AgentRunner:  relay.AgentRunnerCodex,
 		},
 	} {
@@ -1211,6 +1221,7 @@ func TestProcessTodoIssuesReportsMissingRunnerBinary(t *testing.T) {
 		LoopNum:      1,
 		PlanPrompt:   "plan",
 		CodingPrompt: "code",
+		VerifyPrompt: "verify",
 		AgentRunner:  relay.AgentRunnerClaude,
 	}); err != nil {
 		t.Fatalf("save pipeline: %v", err)
@@ -1524,6 +1535,26 @@ func TestReportListsArtifactsAndEventsLog(t *testing.T) {
 	if err := store.AppendEvent(issue.ID, "issue completed"); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
+	if err := store.SaveVerifyResult(issue.ID, relay.VerifyResult{
+		Loop:             1,
+		Passed:           true,
+		Summary:          "CLI smoke passed",
+		ChecksRun:        []string{"go test ./..."},
+		Failures:         []string{},
+		PassedFeatureIDs: []string{"feature-1"},
+	}); err != nil {
+		t.Fatalf("save verify_result loop 1: %v", err)
+	}
+	if err := store.SaveVerifyResult(issue.ID, relay.VerifyResult{
+		Loop:             2,
+		Passed:           false,
+		Summary:          "UI smoke failed",
+		ChecksRun:        []string{"npm test"},
+		Failures:         []string{"submit button still disabled"},
+		PassedFeatureIDs: []string{},
+	}); err != nil {
+		t.Fatalf("save verify_result loop 2: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	if exitCode := run([]string{"report", "-issue", "issue-report", "-state-dir", stateDir}, &stdout, io.Discard); exitCode != 0 {
@@ -1534,6 +1565,16 @@ func TestReportListsArtifactsAndEventsLog(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("events.log")) {
 		t.Fatalf("expected events.log path, got %s", stdout.String())
+	}
+	for _, want := range []string{
+		"latest_verify:",
+		"summary: UI smoke failed",
+		"failures: submit button still disabled",
+		"verify_history:",
+	} {
+		if !bytes.Contains(stdout.Bytes(), []byte(want)) {
+			t.Fatalf("expected report output to contain %q, got %s", want, stdout.String())
+		}
 	}
 }
 
@@ -1592,7 +1633,8 @@ func importTestPipeline(t *testing.T, stateDir, name string) {
 		"init_command: git init repo\n"+
 		"loop_num: 2\n"+
 		"plan_prompt: plan {{issue}}\n"+
-		"coding_prompt: code {{issue}}\n")
+		"coding_prompt: code {{issue}}\n"+
+		"verify_prompt: verify {{issue}}\n")
 	if exitCode := run([]string{"pipeline", "import", "-file", pipelineFile, "-state-dir", stateDir}, io.Discard, io.Discard); exitCode != 0 {
 		t.Fatalf("pipeline import failed")
 	}
@@ -1624,8 +1666,11 @@ func (r scriptedServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (
 		writeFeatureListJSON(r.t, featureListPath, `[{"id":"feature-1","title":"Feature","description":"desc","priority":1,"passes":false,"notes":""}]`)
 		writeProgressEntries(r.t, progressPath, "planned initial features")
 	case "coding":
-		writeFeatureListJSON(r.t, featureListPath, `[{"id":"feature-1","title":"Feature","description":"desc","priority":1,"passes":true,"notes":"verified"}]`)
+		writeFeatureListJSON(r.t, featureListPath, `[{"id":"feature-1","title":"Feature","description":"desc","priority":1,"passes":false,"notes":"verified"}]`)
 		appendProgressEntry(r.t, progressPath, "implemented and verified feature-1")
+	case "verify":
+		verifyResultPath := mustPromptPathValue(r.t, req.Prompt, "VERIFY_RESULT_PATH=")
+		writeVerifyResultJSON(r.t, verifyResultPath, `{"loop":1,"passed":true,"summary":"verified feature-1","checks_run":["go test ./..."],"failures":[],"passed_feature_ids":["feature-1"]}`)
 	default:
 		r.t.Fatalf("unexpected phase %q", req.Phase)
 	}
@@ -1677,6 +1722,16 @@ func appendProgressEntry(t *testing.T, path, entry string) {
 	}
 }
 
+func writeVerifyResultJSON(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir verify result dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write verify result: %v", err)
+	}
+}
+
 func loadIssueSnapshot(t *testing.T, stateDir, issueID string) relay.Issue {
 	t.Helper()
 	store := relay.NewStore(stateDir)
@@ -1719,6 +1774,7 @@ func (r *testServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (rel
 	artifactDir := r.store.IssueDir(req.IssueID)
 	featureListPath := relay.FeatureListPath(artifactDir)
 	progressPath := relay.ProgressPath(artifactDir)
+	verifyResultPath := relay.VerifyResultPath(artifactDir)
 
 	switch req.Phase {
 	case "plan":
@@ -1729,7 +1785,7 @@ func (r *testServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (rel
 			r.t.Fatalf("write progress.txt: %v", err)
 		}
 	case "coding":
-		if err := os.WriteFile(featureListPath, []byte(`[{"id":"feature-1","title":"demo","description":"demo","priority":1,"passes":true,"notes":""}]`), 0o644); err != nil {
+		if err := os.WriteFile(featureListPath, []byte(`[{"id":"feature-1","title":"demo","description":"demo","priority":1,"passes":false,"notes":""}]`), 0o644); err != nil {
 			r.t.Fatalf("write feature_list.json: %v", err)
 		}
 		file, err := os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -1743,6 +1799,12 @@ func (r *testServeRunner) Run(_ context.Context, req relay.AgentRunRequest) (rel
 		if err := file.Close(); err != nil {
 			r.t.Fatalf("close progress.txt: %v", err)
 		}
+	case "verify":
+		if err := os.WriteFile(verifyResultPath, []byte(`{"loop":1,"passed":true,"summary":"ok","checks_run":["go test ./..."],"failures":[],"passed_feature_ids":["feature-1"]}`), 0o644); err != nil {
+			r.t.Fatalf("write verify_result.json: %v", err)
+		}
+	default:
+		r.t.Fatalf("unexpected phase %q", req.Phase)
 	}
 
 	return relay.AgentRunResult{Stdout: req.Phase + "-ok"}, nil

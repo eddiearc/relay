@@ -20,7 +20,8 @@ func TestRelaySubprocessIssueAddCreatesArtifacts(t *testing.T) {
 		"init_command: git init repo\n"+
 		"loop_num: 2\n"+
 		"plan_prompt: plan\n"+
-		"coding_prompt: code\n"), 0o644); err != nil {
+		"coding_prompt: code\n"+
+		"verify_prompt: verify\n"), 0o644); err != nil {
 		t.Fatalf("write pipeline yaml: %v", err)
 	}
 
@@ -98,7 +99,8 @@ func setupSubprocessIssue(t *testing.T) string {
 		"init_command: git init repo\n"+
 		"loop_num: 2\n"+
 		"plan_prompt: plan\n"+
-		"coding_prompt: code\n"), 0o644); err != nil {
+		"coding_prompt: code\n"+
+		"verify_prompt: verify\n"), 0o644); err != nil {
 		t.Fatalf("write pipeline yaml: %v", err)
 	}
 	if result := runRelaySubprocess(t, "pipeline", "import", "-file", pipelineFile, "-state-dir", stateDir); result.exitCode != 0 {

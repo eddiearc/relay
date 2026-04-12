@@ -17,7 +17,18 @@
 artifacts:
 - <STATE_DIR>/issues/issue-report/feature_list.json
 - <STATE_DIR>/issues/issue-report/progress.txt
+- <STATE_DIR>/issues/issue-report/verify_result.json
 - <STATE_DIR>/issues/issue-report/events.log
+
+latest_verify:
+- loop: 1
+- passed: true
+- summary: CLI smoke passed
+- passed_feature_ids: feature-1
+
+verify_history:
+- loop=1 passed=true summary=CLI smoke passed
+- loop=2 passed=false summary=UI smoke failed
 
 logs:
 - <STATE_DIR>/issues/issue-report/runs/coding-loop-01.stderr.log
