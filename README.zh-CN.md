@@ -421,7 +421,7 @@ gh release create v0.1.0 --generate-notes
 
 npm 包结构和首次接入 npm registry 的细节见 [`npm/README.md`](./npm/README.md)。
 
-推荐的 npm 发布方式是 GitHub Actions OIDC 的 Trusted Publishing。当前 release workflow 已经带上了 `id-token: write`；你只需要在 npm 后台为每个 `@eddiearc/*` 包配置 Trusted Publisher，并把 workflow filename 填成 `release-policy.yml`。
+推荐的 npm 发布方式是 GitHub Actions OIDC 的 Trusted Publishing。当前 release workflow 已经带上了 `id-token: write`；你只需要在 npm 后台为每个 `@eddiearc/*` 包配置 Trusted Publisher，并把 workflow filename 填成 `release.yml`。
 
 当前还不建议发 Windows 包，因为运行时里有 `zsh` 和 `SIGKILL` 这样的 Unix 假设。
 
