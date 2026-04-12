@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 
-const workflow = readFileSync('../.github/workflows/release-policy.yml', 'utf8');
+const workflow = readFileSync('../.github/workflows/release.yml', 'utf8');
 
 test('release policy workflow runs on main pushes and manual dry runs', () => {
   assert.match(workflow, /push:\s+branches:\s+- main/s);
@@ -34,5 +34,5 @@ test('release policy workflow performs packaging and npm publish itself', () => 
 });
 
 test('official release publishing no longer depends on a release.published workflow', () => {
-  assert.equal(existsSync('../.github/workflows/release.yml'), false);
+  assert.equal(existsSync('../.github/workflows/release-policy.yml'), false);
 });

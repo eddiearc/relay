@@ -400,12 +400,12 @@ npm --prefix npm run publish-release -- \
 
 Versioning is controlled by CI release policy plus git tags. Relay now uses one official GitHub Actions workflow plus one smoke workflow:
 
-- `release-policy.yml` runs on pushes to `main` and on manual `workflow_dispatch`
+- `release.yml` runs on pushes to `main` and on manual `workflow_dispatch`
 - its `evaluate` job inspects the latest published stable release tag that still reaches `main`
 - if `main` is already covered by that published release, it does nothing
 - if `HEAD` already has an explicit stable tag such as `v1.3.0`, it creates that GitHub release
 - otherwise it derives the next patch tag from the latest published release and creates that release
-- the same `release-policy.yml` run then executes the `package` job, which runs `make test`, `npm --prefix npm test`, builds all archives, uploads them to the stable release, generates npm packages, and publishes them
+- the same `release.yml` run then executes the `package` job, which runs `make test`, `npm --prefix npm test`, builds all archives, uploads them to the stable release, generates npm packages, and publishes them
 - `release-smoke.yml` remains the explicit dry-run packaging path: it creates a temporary draft release, uploads the platform archives, generates the npm packages, validates them with `npm pack --dry-run`, and deletes the temporary release and tag
 
 If you want a local build with explicit version metadata, use:
@@ -425,13 +425,13 @@ go run ./cmd/relay release inspect \
 
 The inspect command prints the chosen action (`noop`, `publish-explicit-tag`, or `auto-cut-patch`), the selected tag when one is needed, and the reason.
 
-To cut an official release in GitHub, let `release-policy.yml` evaluate `main` on push or run it manually with `dry_run=false`. If `HEAD` already has an explicit stable tag such as `v0.1.0`, the workflow creates that GitHub release; otherwise it derives and creates the next patch tag for you.
+To cut an official release in GitHub, let `release.yml` evaluate `main` on push or run it manually with `dry_run=false`. If `HEAD` already has an explicit stable tag such as `v0.1.0`, the workflow creates that GitHub release; otherwise it derives and creates the next patch tag for you.
 
 If you want to validate the policy without publishing anything, run the `Release Policy` workflow manually with `dry_run=true`. You can also set `published_release_tag` to simulate a published baseline without creating a real release first. For packaging-only validation, the `Release Smoke Test` workflow still creates a temporary draft release tag like `v0.0.0-smoke.<run_id>`, uploads the platform archives, generates the npm packages, validates them with `npm pack --dry-run`, and then deletes the temporary release and tag.
 
 For the npm package layout and registry setup, see [`npm/README.md`](./npm/README.md).
 
-The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The packaging workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release-policy.yml`.
+The preferred npm publishing mode is Trusted Publishing via GitHub Actions OIDC. The packaging workflow already includes `id-token: write`; configure Trusted Publisher for each `@eddiearc/*` package in npm using workflow filename `release.yml`.
 
 Windows packages are not published yet because the current runtime assumes Unix tools such as `zsh` and `SIGKILL`.
 
