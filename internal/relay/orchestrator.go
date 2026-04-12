@@ -126,7 +126,7 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 		if err := o.setIssuePhase(&issue, "coding", true); err != nil {
 			return issue, err
 		}
-		done, err := o.runCodingLoop(ctx, pipeline, &issue, loop)
+		err := o.runCodingLoop(ctx, pipeline, &issue, loop)
 		if err != nil {
 			issue.LastError = err.Error()
 			if saveErr := o.Store.SaveIssue(issue); saveErr != nil {
@@ -144,7 +144,32 @@ func (o *Orchestrator) RunIssue(ctx context.Context, pipeline Pipeline, issue Is
 			_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d aborted; advancing to next loop", loop))
 			continue
 		}
-		if done {
+
+		if err := o.setIssuePhase(&issue, "evaluating", true); err != nil {
+			return issue, err
+		}
+		passed, err := o.runEvaluationLoop(ctx, pipeline, &issue, loop)
+		if err != nil {
+			return o.failIssue(issue, err)
+		}
+		if latest, stopped, err := o.finalizeExternalState(issue.ID); err != nil {
+			return o.failIssue(issue, err)
+		} else if stopped {
+			return latest, nil
+		} else {
+			issue = latest
+		}
+
+		if !passed {
+			_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d requested another coding loop", loop))
+			continue
+		}
+
+		items, err := LoadFeatureList(issue.ArtifactDir)
+		if err != nil {
+			return o.failIssue(issue, err)
+		}
+		if AllFeaturesPassed(items) {
 			issue.Status = IssueStatusDone
 			issue.LastError = ""
 			if err := o.clearIssueRuntime(&issue); err != nil {
@@ -201,7 +226,7 @@ func (o *Orchestrator) runPlanning(ctx context.Context, pipeline Pipeline, issue
 	return nil
 }
 
-func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, issue *Issue, loop int) (_ bool, err error) {
+func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, issue *Issue, loop int) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic: %v", recovered)
@@ -210,7 +235,7 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	}()
 	beforeItems, err := LoadFeatureList(issue.ArtifactDir)
 	if err != nil {
-		return false, err
+		return err
 	}
 	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d started", loop))
 	prompt := BuildPrompt(*issue, "coding", loop, pipeline.CodingPrompt) + TailContext(issue.ArtifactDir)
@@ -229,25 +254,87 @@ func (o *Orchestrator) runCodingLoop(ctx context.Context, pipeline Pipeline, iss
 	})
 	if err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d failed: %v", loop, err))
-		return false, err
+		return err
 	}
 	if _, statErr := os.Stat(ProgressPath(issue.ArtifactDir)); statErr != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d validation failed: %v", loop, statErr))
-		return false, fmt.Errorf("coding loop %d is missing progress.txt: %w", loop, statErr)
+		return fmt.Errorf("coding loop %d is missing progress.txt: %w", loop, statErr)
 	}
 	afterItems, err := LoadFeatureList(issue.ArtifactDir)
 	if err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d validation failed: %v", loop, err))
-		return false, err
+		return err
 	}
-	if err := ValidateFeatureTransition(beforeItems, afterItems); err != nil {
+	if err := ValidateFeatureProgressUpdate(beforeItems, afterItems); err != nil {
 		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d validation failed: %v", loop, err))
+		return err
+	}
+	issue.LastError = ""
+	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d completed", loop))
+	return nil
+}
+
+func (o *Orchestrator) runEvaluationLoop(ctx context.Context, pipeline Pipeline, issue *Issue, loop int) (_ bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic: %v", recovered)
+			_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d failed: %v\n%s", loop, err, strings.TrimSpace(string(debug.Stack()))))
+		}
+	}()
+	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d started", loop))
+	prompt := BuildPrompt(*issue, "verify", loop, pipeline.VerifyPrompt) + TailContext(issue.ArtifactDir)
+	loopID := fmt.Sprintf("verify-%02d", loop)
+	_, err = o.Runner.Run(ctx, AgentRunRequest{
+		Phase:       "verify",
+		Workdir:     issue.WorkdirPath,
+		ArtifactDir: issue.ArtifactDir,
+		Prompt:      prompt,
+		IssueID:     issue.ID,
+		LoopID:      loopID,
+		LogDir:      o.Store.RunDir(issue.ID),
+		OnPID: func(pid int) {
+			o.trackIssuePID(issue, "evaluating", pid)
+		},
+	})
+	if err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d failed: %v", loop, err))
 		return false, err
 	}
-	done := AllFeaturesPassed(afterItems)
+	result, err := LoadVerifyResult(issue.ArtifactDir)
+	if err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
+	if result.Loop != loop {
+		err := fmt.Errorf("verify_result.json loop mismatch: expected %d, got %d", loop, result.Loop)
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
+	if err := o.Store.SaveVerifyResult(issue.ID, result); err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
+	items, err := LoadFeatureList(issue.ArtifactDir)
+	if err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
+	updatedItems, err := ApplyVerifiedFeatures(items, result.PassedFeatureIDs)
+	if err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
+	if err := o.Store.SaveFeatureList(issue.ID, updatedItems); err != nil {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d validation failed: %v", loop, err))
+		return false, err
+	}
 	issue.LastError = ""
-	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("coding loop=%d completed done=%t", loop, done))
-	return done, nil
+	if result.Passed {
+		_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d passed", loop))
+		return true, nil
+	}
+	_ = o.Store.AppendEvent(issue.ID, fmt.Sprintf("evaluation loop=%d failed", loop))
+	return false, nil
 }
 
 func (o *Orchestrator) createWorkspace(issueID string) (string, error) {

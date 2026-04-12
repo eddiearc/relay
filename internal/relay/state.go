@@ -105,6 +105,42 @@ func (s *Store) SaveIssue(issue Issue) error {
 	return writeFileAtomically(IssueFilePath(issue.ArtifactDir), data, 0o644)
 }
 
+func (s *Store) SaveFeatureList(issueID string, items []FeatureItem) error {
+	if err := ValidateFeatureList(items); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal feature_list.json: %w", err)
+	}
+	artifactDir := s.IssueDir(issueID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomically(FeatureListPath(artifactDir), data, 0o644)
+}
+
+func (s *Store) SaveVerifyResult(issueID string, result VerifyResult) error {
+	if err := ValidateVerifyResult(result); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal verify_result.json: %w", err)
+	}
+	artifactDir := s.IssueDir(issueID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeFileAtomically(VerifyResultPath(artifactDir), data, 0o644); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(VerifyHistoryDirPath(artifactDir), 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomically(VerifyHistoryPath(artifactDir, result.Loop), data, 0o644)
+}
+
 func (s *Store) LoadIssue(issueID string) (Issue, error) {
 	var issue Issue
 	data, err := os.ReadFile(s.IssuePath(issueID))

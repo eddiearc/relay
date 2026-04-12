@@ -78,6 +78,57 @@ func ValidateFeatureTransition(previous, current []FeatureItem) error {
 	return nil
 }
 
+func ValidateFeatureProgressUpdate(previous, current []FeatureItem) error {
+	prevByID := map[string]FeatureItem{}
+	for _, item := range previous {
+		prevByID[item.ID] = item
+	}
+	currentByID := map[string]FeatureItem{}
+	for _, item := range current {
+		currentByID[item.ID] = item
+	}
+	for id, prev := range prevByID {
+		next, ok := currentByID[id]
+		if !ok {
+			return fmt.Errorf("feature %q was removed", id)
+		}
+		if prev.Passes != next.Passes {
+			return fmt.Errorf("coding loop must not change passes for feature %q", id)
+		}
+	}
+	return nil
+}
+
+func ApplyVerifiedFeatures(items []FeatureItem, passedFeatureIDs []string) ([]FeatureItem, error) {
+	if len(passedFeatureIDs) == 0 {
+		return append([]FeatureItem(nil), items...), nil
+	}
+	seen := map[string]struct{}{}
+	for _, id := range passedFeatureIDs {
+		if id == "" {
+			return nil, fmt.Errorf("passed_feature_ids must not contain empty ids")
+		}
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf("passed_feature_ids contains duplicate id %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+	updated := append([]FeatureItem(nil), items...)
+	found := map[string]bool{}
+	for i := range updated {
+		if _, ok := seen[updated[i].ID]; ok {
+			updated[i].Passes = true
+			found[updated[i].ID] = true
+		}
+	}
+	for id := range seen {
+		if !found[id] {
+			return nil, fmt.Errorf("passed_feature_ids references unknown feature %q", id)
+		}
+	}
+	return updated, nil
+}
+
 func AllFeaturesPassed(items []FeatureItem) bool {
 	for _, item := range items {
 		if !item.Passes {

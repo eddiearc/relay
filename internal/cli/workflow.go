@@ -54,6 +54,7 @@ func runPipelineShow(args []string, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "- loop_limit: %d\n", pipeline.LoopNum)
 	_, _ = fmt.Fprintf(stdout, "- plan_constraints: %s\n", strings.Join(summarizePromptConstraints(pipeline.PlanPrompt, "plan", 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "- coding_constraints: %s\n", strings.Join(summarizePromptConstraints(pipeline.CodingPrompt, "coding", 3), " | "))
+	_, _ = fmt.Fprintf(stdout, "- verify_constraints: %s\n", strings.Join(summarizePromptConstraints(pipeline.VerifyPrompt, "verify", 3), " | "))
 	_, _ = fmt.Fprintf(stdout, "\nyaml:\n%s", string(data))
 	writePipelineShowHints(stderr, pipeline.Name, *stateDir)
 	return 0
@@ -175,6 +176,7 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 	var havePrevious bool
 	var eventOffset int64
 	var progressSnapshot string
+	var verifySnapshot string
 	var latestRunSummary string
 	var startHintShown bool
 	var previousLastLine string
@@ -198,6 +200,10 @@ func runWatch(args []string, stdout, stderr io.Writer) int {
 		if summary := summarizeProgressFile(issue.ArtifactDir); summary != "" && summary != progressSnapshot {
 			progressSnapshot = summary
 			_, _ = fmt.Fprintf(stdout, "progress=%s\n", summary)
+		}
+		if summary := summarizeLatestVerifyResult(issue.ArtifactDir); summary != "" && summary != verifySnapshot {
+			verifySnapshot = summary
+			_, _ = fmt.Fprintf(stdout, "latest_verify=%s\n", summary)
 		}
 
 		eventsPath := store.EventsPath(issue.ID)
@@ -272,6 +278,18 @@ func summarizeProgressFile(artifactDir string) string {
 		return "progress.txt exists but is empty"
 	}
 	return fmt.Sprintf("progress.txt entries=%d latest=%s", entries, latest)
+}
+
+func summarizeLatestVerifyResult(artifactDir string) string {
+	result, err := relay.LoadVerifyResult(artifactDir)
+	if err != nil {
+		return ""
+	}
+	summary := fmt.Sprintf("loop=%d passed=%t summary=%s", result.Loop, result.Passed, result.Summary)
+	if len(result.Failures) > 0 {
+		summary += " failures=" + strings.Join(result.Failures, " | ")
+	}
+	return summary
 }
 
 func readNewEventLines(path string, offset int64) (int64, []string, error) {
@@ -461,6 +479,8 @@ func summarizeAgentActivity(store *relay.Store, issue relay.Issue, tracker *agen
 	loopID := "plan"
 	if issue.ActivePhase == "coding" {
 		loopID = fmt.Sprintf("loop-%02d", issue.CurrentLoop)
+	} else if issue.ActivePhase == "evaluating" {
+		loopID = fmt.Sprintf("verify-%02d", issue.CurrentLoop)
 	}
 
 	stdoutPath := filepath.Join(store.RunDir(issue.ID), loopID+".stdout.log")

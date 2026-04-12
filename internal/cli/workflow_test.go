@@ -354,6 +354,17 @@ func TestWatchReturnsFailureSummary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(store.RunDir(issue.ID), "loop-01.stderr.log"), []byte("command failed\nmore detail\n"), 0o644); err != nil {
 		t.Fatalf("write stderr log: %v", err)
 	}
+	verifyResult := `{
+  "loop": 1,
+  "passed": false,
+  "summary": "health endpoint failed",
+  "checks_run": ["curl /health"],
+  "failures": ["GET /health returned 500"],
+  "passed_feature_ids": []
+}`
+	if err := os.WriteFile(relay.VerifyResultPath(store.IssueDir(issue.ID)), []byte(verifyResult), 0o644); err != nil {
+		t.Fatalf("write verify_result.json: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	exitCode := run([]string{"watch", "-issue", issue.ID, "--poll-interval", "10ms", "-state-dir", stateDir}, &stdout, io.Discard)
@@ -363,6 +374,7 @@ func TestWatchReturnsFailureSummary(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"status=failed loop=0",
+		"latest_verify=loop=1 passed=false summary=health endpoint failed failures=GET /health returned 500",
 		"latest_run=loop-01.stderr.log: command failed",
 		"terminal_status=failed",
 	} {
@@ -492,6 +504,9 @@ func savePipelineForTest(t *testing.T, stateDir string, pipeline relay.Pipeline)
 	store := relay.NewStore(stateDir)
 	if err := store.Ensure(); err != nil {
 		t.Fatalf("ensure store: %v", err)
+	}
+	if pipeline.VerifyPrompt == "" {
+		pipeline.VerifyPrompt = "verify"
 	}
 	if err := store.SavePipeline(pipeline); err != nil {
 		t.Fatalf("save pipeline %s: %v", pipeline.Name, err)

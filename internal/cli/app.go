@@ -179,14 +179,14 @@ Examples:
   relay pipeline template
   relay pipeline import -file pipeline.yaml
   relay pipeline show demo
-  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md
+  relay pipeline add demo --init-command 'git clone --depth 1 https://github.com/owner/repo .' --agent-runner claude --plan-prompt-file plan.md --coding-prompt-file coding.md --verify-prompt-file verify.md
   relay pipeline edit demo --loop-num 15 --agent-runner codex
 `
 
 var pipelineAddUsage = `create a pipeline from flags and prompt files.
 
 Usage:
-  relay pipeline add <name> --init-command <command> --plan-prompt-file <file> --coding-prompt-file <file> [flags]
+  relay pipeline add <name> --init-command <command> --plan-prompt-file <file> --coding-prompt-file <file> --verify-prompt-file <file> [flags]
 
 Required:
   <name>                 Saved pipeline name
@@ -194,6 +194,7 @@ Required:
   --agent-runner         Optional runner override: "", codex, or claude
   --plan-prompt-file     Planner prompt template file
   --coding-prompt-file   Coding prompt template file
+  --verify-prompt-file   Evaluator prompt template file
 
 Pipeline rules:
   - init_command should usually create a fresh workspace checkout
@@ -218,7 +219,8 @@ Examples:
     --init-command 'git clone --depth 1 https://github.com/owner/repo .' \
     --agent-runner claude \
     --plan-prompt-file plan.md \
-    --coding-prompt-file coding.md
+    --coding-prompt-file coding.md \
+    --verify-prompt-file verify.md
 `
 
 var pipelineEditUsage = `update a saved pipeline.
@@ -232,11 +234,13 @@ What can be changed:
   --loop-num
   --plan-prompt-file
   --coding-prompt-file
+  --verify-prompt-file
 
 Examples:
   relay pipeline edit demo --loop-num 15
   relay pipeline edit demo --agent-runner claude
   relay pipeline edit demo --coding-prompt-file coding-v2.md
+  relay pipeline edit demo --verify-prompt-file verify-v2.md
 `
 
 var pipelineImportUsage = `import a pipeline from YAML.
@@ -249,6 +253,7 @@ Required pipeline YAML fields:
   - init_command
   - plan_prompt
   - coding_prompt
+  - verify_prompt
 
 Optional pipeline YAML fields:
   - agent_runner (empty, codex, or claude; defaults to codex when omitted)
@@ -270,6 +275,7 @@ What it prints:
   - effective agent runner
   - loop limit
   - key plan and coding constraints
+  - key verify constraints
   - full saved YAML
 
 Examples:
@@ -285,6 +291,7 @@ What it prints:
   - a full pipeline.yaml skeleton
   - optional runner selection with codex defaulting
   - branch and PR guidance in the embedded prompts
+  - independent evaluation guidance in the embedded prompts
   - default loop_num guidance suitable for real repository work
 
 Examples:
@@ -614,6 +621,11 @@ coding_prompt: |
   Update FEATURE_LIST_PATH based on verified state, not intention.
   Record evidence or blockers in notes.
   Append a concise handoff entry to PROGRESS_PATH before finishing.
+verify_prompt: |
+  Read FEATURE_LIST_PATH and PROGRESS_PATH before verifying.
+  Inspect WORKDIR_PATH directly and run the smallest realistic checks for the current slice.
+  Do not trust the coding phase's self-report.
+  Write VERIFY_RESULT_PATH as JSON with loop, passed, summary, checks_run, and failures.
 `
 
 var issueTemplateJSON = `{
@@ -1281,6 +1293,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	agentRunner := fs.String("agent-runner", "", `optional agent runner override: "", codex, or claude`)
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
+	verifyPromptFile := fs.String("verify-prompt-file", "", "path to verify prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1300,6 +1313,11 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 	codingPrompt, err := os.ReadFile(*codingPromptFile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "read coding prompt: %v\n", err)
+		return 1
+	}
+	verifyPrompt, err := os.ReadFile(*verifyPromptFile)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "read verify prompt: %v\n", err)
 		return 1
 	}
 	resolvedRunner := *agentRunner
@@ -1323,6 +1341,7 @@ func runPipelineAdd(args []string, stdout, stderr io.Writer) int {
 		LoopNum:      *loopNum,
 		PlanPrompt:   string(planPrompt),
 		CodingPrompt: string(codingPrompt),
+		VerifyPrompt: string(verifyPrompt),
 	}
 	if err := pipeline.Normalize(); err != nil {
 		_, _ = fmt.Fprintf(stderr, "build pipeline: %v\n", err)
@@ -1355,6 +1374,7 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&agentRunner, "agent-runner", `optional agent runner override: "", codex, or claude`)
 	planPromptFile := fs.String("plan-prompt-file", "", "path to plan prompt template file")
 	codingPromptFile := fs.String("coding-prompt-file", "", "path to coding prompt template file")
+	verifyPromptFile := fs.String("verify-prompt-file", "", "path to verify prompt template file")
 	stateDir := fs.String("state-dir", "", "directory for relay state (default: ~/.relay)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1396,6 +1416,14 @@ func runPipelineEdit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		pipeline.CodingPrompt = string(codingPrompt)
+	}
+	if *verifyPromptFile != "" {
+		verifyPrompt, err := os.ReadFile(*verifyPromptFile)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "read verify prompt: %v\n", err)
+			return 1
+		}
+		pipeline.VerifyPrompt = string(verifyPrompt)
 	}
 	if err := pipeline.Normalize(); err != nil {
 		_, _ = fmt.Fprintf(stderr, "build pipeline: %v\n", err)
@@ -1942,7 +1970,22 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "write report: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "\nartifacts:\n- %s\n- %s\n- %s\n", relay.FeatureListPath(issue.ArtifactDir), relay.ProgressPath(issue.ArtifactDir), store.EventsPath(issue.ID))
+	_, _ = fmt.Fprintf(stdout, "\nartifacts:\n- %s\n- %s\n- %s\n- %s\n", relay.FeatureListPath(issue.ArtifactDir), relay.ProgressPath(issue.ArtifactDir), relay.VerifyResultPath(issue.ArtifactDir), store.EventsPath(issue.ID))
+	if verifyResult, err := relay.LoadVerifyResult(issue.ArtifactDir); err == nil {
+		_, _ = fmt.Fprintf(stdout, "\nlatest_verify:\n- loop: %d\n- passed: %t\n- summary: %s\n", verifyResult.Loop, verifyResult.Passed, verifyResult.Summary)
+		if len(verifyResult.Failures) > 0 {
+			_, _ = fmt.Fprintf(stdout, "- failures: %s\n", strings.Join(verifyResult.Failures, " | "))
+		}
+		if len(verifyResult.PassedFeatureIDs) > 0 {
+			_, _ = fmt.Fprintf(stdout, "- passed_feature_ids: %s\n", strings.Join(verifyResult.PassedFeatureIDs, ", "))
+		}
+	}
+	if verifyHistory, err := relay.LoadVerifyHistory(issue.ArtifactDir); err == nil && len(verifyHistory) > 0 {
+		_, _ = fmt.Fprintf(stdout, "\nverify_history:\n")
+		for _, result := range verifyHistory {
+			_, _ = fmt.Fprintf(stdout, "- loop=%d passed=%t summary=%s\n", result.Loop, result.Passed, result.Summary)
+		}
+	}
 	runDir := store.RunDir(issue.ID)
 	entries, err := os.ReadDir(runDir)
 	if err == nil {

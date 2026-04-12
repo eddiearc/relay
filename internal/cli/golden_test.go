@@ -127,6 +127,26 @@ func setupReportGoldenState(t *testing.T) string {
 	if err := store.AppendEvent(issue.ID, "issue completed"); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
+	if err := store.SaveVerifyResult(issue.ID, relay.VerifyResult{
+		Loop:             2,
+		Passed:           false,
+		Summary:          "UI smoke failed",
+		ChecksRun:        []string{"npm test"},
+		Failures:         []string{"submit button still disabled"},
+		PassedFeatureIDs: []string{},
+	}); err != nil {
+		t.Fatalf("save latest verify result: %v", err)
+	}
+	if err := store.SaveVerifyResult(issue.ID, relay.VerifyResult{
+		Loop:             1,
+		Passed:           true,
+		Summary:          "CLI smoke passed",
+		ChecksRun:        []string{"go test ./..."},
+		Failures:         []string{},
+		PassedFeatureIDs: []string{"feature-1"},
+	}); err != nil {
+		t.Fatalf("save archived verify result: %v", err)
+	}
 	runDir := store.RunDir(issue.ID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatalf("mkdir run dir: %v", err)

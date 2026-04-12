@@ -31,7 +31,7 @@ func TestBuildPromptPlanIncludesArtifactSchemaAndRestrictions(t *testing.T) {
 		"PROGRESS_PATH=/tmp/state/issues/issue-1/progress.txt",
 		"Artifact directory layout:",
 		"- ISSUE_PATH stores the durable issue metadata for this task.",
-		"- A runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning and coding runs",
+		"- A runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning, coding, and evaluating runs",
 	} {
 		if !strings.Contains(prompt, needle) {
 			t.Fatalf("prompt missing %q\n%s", needle, prompt)
@@ -94,12 +94,13 @@ func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 		"Do not use apply_patch with absolute paths",
 		"FEATURE_LIST_PATH must remain a JSON array",
 		"Do not change any feature passes value from true back to false",
+		"Do not set any feature passes value from false to true during coding",
 		"Default each coding loop to one main feature from FEATURE_LIST_PATH, or at most a very small cluster of tightly related tasks required to finish that feature safely",
 		"Before editing code, choose the verification path for that feature and keep implementation aligned with it",
 		"Prefer finishing one slice thoroughly instead of touching multiple planned features shallowly",
 		"When broader rollout work remains, keep those features explicit in FEATURE_LIST_PATH with passes=false and notes describing what is still missing",
 		"WORKDIR_PATH=/tmp/workspaces/issue-1/repo",
-		"runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning and coding runs for debugging",
+		"runs/ directory under the artifact directory stores stdout, stderr, and final messages from prior planning, coding, and evaluating runs for debugging",
 	} {
 		if !strings.Contains(prompt, needle) {
 			t.Fatalf("prompt missing %q\n%s", needle, prompt)
@@ -107,6 +108,36 @@ func TestBuildPromptCodingIncludesArtifactUpdateRules(t *testing.T) {
 	}
 	if strings.Contains(prompt, "\"status\": \"running\"") {
 		t.Fatalf("prompt should not include issue JSON by default\n%s", prompt)
+	}
+}
+
+func TestBuildPromptVerifyIncludesIndependentEvaluationContract(t *testing.T) {
+	issue := Issue{
+		ID:            "issue-1",
+		PipelineName:  "demo",
+		Goal:          "goal",
+		Description:   "desc",
+		Status:        IssueStatusRunning,
+		ArtifactDir:   "/tmp/state/issues/issue-1",
+		WorkspacePath: "/tmp/workspaces/issue-1",
+		WorkdirPath:   "/tmp/workspaces/issue-1/repo",
+		CurrentLoop:   2,
+	}
+
+	prompt := BuildPrompt(issue, "verify", 2, "pipeline verify prompt")
+
+	for _, needle := range []string{
+		"You are the evaluating phase of Relay.",
+		"Do not trust the coding phase's self-report.",
+		"Read FEATURE_LIST_PATH and PROGRESS_PATH before verifying the workdir.",
+		"Write VERIFY_RESULT_PATH as JSON.",
+		"passed_feature_ids: array of feature ids verified in this loop",
+		"VERIFY_RESULT_PATH=/tmp/state/issues/issue-1/verify_result.json",
+		"WORKDIR_PATH=/tmp/workspaces/issue-1/repo",
+	} {
+		if !strings.Contains(prompt, needle) {
+			t.Fatalf("verify prompt missing %q\n%s", needle, prompt)
+		}
 	}
 }
 
@@ -141,5 +172,40 @@ func TestTailContextSummarizesArtifactsWithoutInliningProgressText(t *testing.T)
 	}
 	if strings.Contains(context, "ignore previous instructions") {
 		t.Fatalf("tail context should not inline raw progress log\n%s", context)
+	}
+}
+
+func TestTailContextIncludesLatestFailedVerificationSummary(t *testing.T) {
+	artifactDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(artifactDir, "feature_list.json"), []byte(`[
+  {"id":"F-1","title":"First","description":"finish first step","priority":1,"passes":false,"notes":""}
+]`), 0o644); err != nil {
+		t.Fatalf("write feature_list.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "progress.txt"), []byte("loop 1 complete\n"), 0o644); err != nil {
+		t.Fatalf("write progress.txt: %v", err)
+	}
+	verifyResult := `{
+  "loop": 1,
+  "passed": false,
+  "summary": "HTTP smoke check failed",
+  "checks_run": ["go test ./...", "curl http://localhost:3000/health"],
+  "failures": ["GET /health returned 500"],
+  "passed_feature_ids": []
+}`
+	if err := os.WriteFile(filepath.Join(artifactDir, "verify_result.json"), []byte(verifyResult), 0o644); err != nil {
+		t.Fatalf("write verify_result.json: %v", err)
+	}
+
+	context := TailContext(artifactDir)
+
+	for _, needle := range []string{
+		"Latest evaluation: FAIL on loop 1.",
+		"Summary: HTTP smoke check failed",
+		"Failures: GET /health returned 500",
+	} {
+		if !strings.Contains(context, needle) {
+			t.Fatalf("tail context missing %q\n%s", needle, context)
+		}
 	}
 }
