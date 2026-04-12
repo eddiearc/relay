@@ -243,6 +243,10 @@ func TestClaudeRunnerRunDirectCLI(t *testing.T) {
 	recordPath := filepath.Join(tempDir, "args.txt")
 	promptPath := filepath.Join(tempDir, "prompt.txt")
 	pwdPath := filepath.Join(tempDir, "pwd.txt")
+	artifactDir := filepath.Join(tempDir, "artifacts")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
 	claudePath := writeFakeClaude(t, tempDir)
 
 	t.Setenv("RUNNER_RECORD_FILE", recordPath)
@@ -255,11 +259,12 @@ func TestClaudeRunnerRunDirectCLI(t *testing.T) {
 	var seenPID int
 	runner := ClaudeRunner{Command: claudePath}
 	result, err := runner.Run(context.Background(), AgentRunRequest{
-		Phase:   "coding",
-		Workdir: repoPath,
-		Prompt:  "hello from relay",
-		IssueID: "issue-1",
-		LoopID:  "loop-01",
+		Phase:       "coding",
+		Workdir:     repoPath,
+		ArtifactDir: artifactDir,
+		Prompt:      "hello from relay",
+		IssueID:     "issue-1",
+		LoopID:      "loop-01",
 		OnPID: func(pid int) {
 			seenPID = pid
 		},
@@ -288,7 +293,7 @@ func TestClaudeRunnerRunDirectCLI(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	argsText := string(argsData)
-	for _, fragment := range []string{"-p", "--dangerously-skip-permissions", "--output-format", "text"} {
+	for _, fragment := range []string{"-p", "--dangerously-skip-permissions", "--permission-mode", "bypassPermissions", "--output-format", "text", "--add-dir", artifactDir} {
 		if !strings.Contains(argsText, fragment) {
 			t.Fatalf("expected args to contain %q, got %q", fragment, argsText)
 		}

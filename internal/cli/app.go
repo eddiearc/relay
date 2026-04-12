@@ -2115,15 +2115,18 @@ func recoverActiveIssues(store *relay.Store) (int, error) {
 		if !relay.IsIssueActiveStatus(issue.Status) {
 			continue
 		}
-		issue.Status = relay.IssueStatusTodo
+		if err := terminateIssueProcesses(issue.ActivePIDs); err != nil {
+			return recovered, err
+		}
+		issue.Status = relay.IssueStatusFailed
 		issue.ActivePhase = ""
 		issue.ActivePIDs = nil
 		issue.InterruptRequested = false
-		issue.LastError = "relay serve restarted while issue was active; previous run discarded"
+		issue.LastError = "relay serve restarted while issue was active; orphaned run marked failed for manual recovery"
 		if err := store.SaveIssue(issue); err != nil {
 			return recovered, err
 		}
-		_ = store.AppendEvent(issue.ID, "recovered orphaned active issue after service restart")
+		_ = store.AppendEvent(issue.ID, "recovered orphaned active issue as failed after service restart")
 		recovered++
 	}
 	return recovered, nil
